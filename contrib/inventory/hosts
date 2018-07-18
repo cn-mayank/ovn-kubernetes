@@ -1,10 +1,14 @@
 [kube-master]
-node1
+10.224.141.74
+
+[kube-master:vars]
+ansible_python_interpreter=/usr/bin/python3
 
 [kube-minions-linux]
-node2
-node3
+10.224.140.140
+
+[kube-minions-linux:vars]
+ansible_python_interpreter=/usr/bin/python3
 
 [kube-minions-windows]
-node4
-node5
+10.224.131.241

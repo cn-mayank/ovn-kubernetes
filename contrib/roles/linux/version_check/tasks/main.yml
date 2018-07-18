@@ -8,3 +8,9 @@
   fail:
     msg: "Distribution version {{ ansible_distribution_version }} not supported by this playbook"
   when: ansible_distribution_version != '16.04' and ansible_distribution_version != '14.04'
+
+- name: install apt-transport-https
+  apt:
+    pkg: apt-transport-https
+    state: present
+    cache_valid_time: 86400
