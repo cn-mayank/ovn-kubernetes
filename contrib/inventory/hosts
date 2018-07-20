@@ -5,7 +5,7 @@
 ansible_python_interpreter=/usr/bin/python3
 
 [kube-minions-linux]
-10.224.134.42
+10.224.129.184
 
 [kube-minions-linux:vars]
 ansible_python_interpreter=/usr/bin/python3
