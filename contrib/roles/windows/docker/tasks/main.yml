@@ -9,6 +9,44 @@
     name: docker
   register: docker_service
 
+- name: Docker | open docker port in firewall rule
+  win_firewall_rule:
+    name: "docker port expose"
+    localport: 2375
+    action: allow
+    direction: in
+    state: present
+    enabled: yes
+
+- name: Docker | open docker port out firewall rule
+  win_firewall_rule:
+    name: "docker port expose"
+    localport: 2375
+    action: allow
+    direction: out
+    state: present
+    enabled: yes
+
+- name: Run an executable and send data to the stdin for the executable
+  win_command: netsh interface portproxy add v4tov4 listenport=2375 connectaddress=127.0.0.1 connectport=2375 listenaddress={{ inventory_hostname }} protocol=tcp 
+#  args:
+#    stdin: interface portproxy add v4tov4 listenport=2375 connectaddress=127.0.0.1 connectport=2375 listenaddress={{ inventory_hostname }} protocol=tcp
+  register: opvariable
+  tags:
+    - experiment
+
+- debug: msg={{ opvariable.cmd }}
+  tags:
+    - experiment   
+
+- debug: msg={{ opvariable.rc }}
+  tags:
+    - experiment   
+
+- debug: msg={{ opvariable.stdout_lines }}
+  tags:
+    - experiment
+
 - name: Docker | Install docker
   block:
   - name: Docker | Install required features
@@ -18,3 +56,22 @@
   - name: Docker | Get Docker binaries
     include_tasks: ./install_docker.yml
   when: not docker_service.exists
+
+- name: Run an executable and send data to the stdin for the executable
+  win_command: sc config docker binpath= "\"C:\Program Files\docker\dockerd.exe\" --run-service -H tcp://0.0.0.0:2375"
+#  register: opvariable
+#  tags:
+#    - experiment
+
+#- debug: msg={{ opvariable.cmd }}
+#  tags:
+#    - experiment
+#
+#- debug: msg={{ opvariable.stdout_lines }}
+#  tags:
+#    - experiment
+
+- name: Restart docker after exposing port
+  win_service:
+    name: docker
+    state: restarted
