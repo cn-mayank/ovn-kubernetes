@@ -13,6 +13,7 @@
   win_firewall_rule:
     name: "docker port expose"
     localport: 2375
+    protocol: tcp
     action: allow
     direction: in
     state: present
@@ -23,6 +24,7 @@
     name: "docker port expose"
     localport: 2375
     action: allow
+    protocol: tcp
     direction: out
     state: present
     enabled: yes
@@ -57,8 +59,8 @@
     include_tasks: ./install_docker.yml
   when: not docker_service.exists
 
-- name: Run an executable and send data to the stdin for the executable
-  win_command: sc config docker binpath= "\"C:\Program Files\docker\dockerd.exe\" --run-service -H tcp://0.0.0.0:2375"
+#- name: Run an executable and send data to the stdin for the executable
+#  win_command: sc config docker binpath= "\"C:\Program Files\docker\dockerd.exe\" --run-service -H tcp://0.0.0.0:2375"
 #  register: opvariable
 #  tags:
 #    - experiment

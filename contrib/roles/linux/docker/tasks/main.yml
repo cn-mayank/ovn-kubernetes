@@ -62,13 +62,13 @@
   retries: 3
   with_items: "{{ docker_package_info.pkgs }}"
 
-- name: Docker | expose docker port
-  lineinfile: 
-    path: /lib/systemd/system/docker.service
-    regexp: '^ExecStart='
-    line: 'ExecStart=\/usr\/bin\/dockerd -H fd:\/\/ -H tcp:\/\/0.0.0.0:2375 "$DOCKER_OPTS"/'
-  tags:
-    - experiment
+#- name: Docker | expose docker port
+#  lineinfile: 
+#    path: /lib/systemd/system/docker.service
+#    regexp: '^ExecStart='
+#    line: 'ExecStart=/usr/bin/dockerd -H fd:// -H tcp://0.0.0.0:2375 "$DOCKER_OPTS"'
+#  tags:
+#    - experiment
 
 - name: Docker | restart docker
   include_tasks: ./restart_docker.yml
