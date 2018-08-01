@@ -11,8 +11,6 @@ spec:
   selector:
     matchLabels:
       app: ovnkube
-      # use compute nodes - Will likley change
-      node-role.kubernetes.io/compute: "true"
   updateStrategy:
     type: RollingUpdate
   template:
@@ -22,7 +20,6 @@ spec:
         component: network
         type: infra
         openshift.io/component: network
-        node-role.kubernetes.io/compute: "true"
       annotations:
         scheduler.alpha.kubernetes.io/critical-pod: ''
     spec:
@@ -51,9 +48,6 @@ spec:
 
         volumeMounts:
         # Directory which contains the host configuration.
-        - mountPath: /etc/origin/node/
-          name: host-config
-          readOnly: true
         - mountPath: /etc/sysconfig/origin-node
           name: host-sysconfig-node
           readOnly: true
@@ -65,6 +59,8 @@ spec:
         - mountPath: /var/run/dbus/
           name: host-var-run-dbus
           readOnly: true
+        - mountPath: /var/lib/openvswitch/
+          name: host-var-lib-ovs
         - mountPath: /var/run/openvswitch/
           name: host-var-run-ovs
        #  readOnly: false
@@ -112,6 +108,11 @@ spec:
             configMapKeyRef:
               name: ovn-config
               key: k8s_apiserver
+        - name: K8S_NODE
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+
         ports:
         - name: healthz
           containerPort: 10256
@@ -124,14 +125,9 @@ spec:
         #     port: 10256
         #     scheme: HTTP
         lifecycle:
-      nodeSelector:
-        node-role.kubernetes.io/compute: "true"
       volumes:
       # In bootstrap mode, the host config contains information not easily available
       # from other locations.
-      - name: host-config
-        hostPath:
-          path: /etc/origin/node
       - name: host-sysconfig-node
         hostPath:
           path: /etc/sysconfig/origin-node
@@ -146,6 +142,9 @@ spec:
       - name: host-var-run-dbus
         hostPath:
           path: /var/run/dbus
+      - name: host-var-lib-ovs
+        hostPath:
+          path: /var/lib/openvswitch
       - name: host-var-run-ovs
         hostPath:
           path: /var/run/openvswitch

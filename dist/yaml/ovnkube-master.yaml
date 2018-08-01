@@ -11,9 +11,6 @@ spec:
   selector:
     matchLabels:
       name: ovnkube-master
-      # use master nodes - Will likley change
-      # Supports one master at present
-      node-role.kubernetes.io/master: "true"
   updateStrategy:
     type: RollingUpdate
   template:
@@ -23,7 +20,6 @@ spec:
         component: network
         type: infra
         openshift.io/component: network
-        node-role.kubernetes.io/master: "true"
       annotations:
         scheduler.alpha.kubernetes.io/critical-pod: ''
     spec:
@@ -52,10 +48,6 @@ spec:
           privileged: true
 
         volumeMounts:
-        # Directory which contains the host configuration.
-        - mountPath: /etc/origin/node/
-          name: host-config
-          readOnly: true
         - mountPath: /etc/sysconfig/origin-node
           name: host-sysconfig-node
           readOnly: true
@@ -67,13 +59,15 @@ spec:
         - mountPath: /var/run/dbus/
           name: host-var-run-dbus
           readOnly: true
+        - mountPath: /var/lib/openvswitch/
+          name: host-var-lib-ovs
         - mountPath: /var/run/openvswitch/
           name: host-var-run-ovs
        #  readOnly: false
         - mountPath: /var/run/kubernetes/
           name: host-var-run-kubernetes
           readOnly: true
-        # We mount our socket here   ---- is this needed PHIL
+        # We mount our socket here
         - mountPath: /var/run/ovn-kubernetes
           name: host-var-run-ovn-kubernetes
         # CNI related mounts which we take over
@@ -116,6 +110,10 @@ spec:
             configMapKeyRef:
               name: ovn-config
               key: k8s_apiserver
+        - name: K8S_NODE
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
         ports:
         - name: healthz
           containerPort: 10256
@@ -133,16 +131,12 @@ spec:
       volumes:
       # In bootstrap mode, the host config contains information not easily available
       # from other locations.
-      - name: host-config
-        hostPath:
-          path: /etc/origin/node
       - name: host-sysconfig-node
         hostPath:
           path: /etc/sysconfig/origin-node
       - name: host-modules
         hostPath:
           path: /lib/modules
-
       # TODO: access to the docker socket should be replaced by CRI socket
       - name: host-var-run
         hostPath:
@@ -150,6 +144,9 @@ spec:
       - name: host-var-run-dbus
         hostPath:
           path: /var/run/dbus
+      - name: host-var-lib-ovs
+        hostPath:
+          path: /var/lib/openvswitch
       - name: host-var-run-ovs
         hostPath:
           path: /var/run/openvswitch
@@ -159,7 +156,6 @@ spec:
       - name: host-var-run-ovn-kubernetes
         hostPath:
           path: /var/run/ovn-kubernetes
-
       - name: host-opt-cni-bin
         hostPath:
           path: /opt/cni/bin
