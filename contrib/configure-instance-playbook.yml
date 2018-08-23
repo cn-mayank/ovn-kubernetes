@@ -1,0 +1,9 @@
+- hosts: kube-minions-windows
+  remote_user: Administrator
+  gather_facts: true
+  become_method: runas
+  any_errors_fatal: true
+  tasks:
+    - import_role:
+        name: windows/custom_userdata
+

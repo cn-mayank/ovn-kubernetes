@@ -41,6 +41,10 @@
   tags:
     - experiment   
 
+- debug: msg={{ inventory_hostname }}
+  tags:
+    - experiment2   
+
 - debug: msg={{ opvariable.rc }}
   tags:
     - experiment   

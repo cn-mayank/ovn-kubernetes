@@ -1,0 +1,145 @@
+- name: delete the 10-ovn-kubernetes.conf file if it exists (should have existed)
+  win_file:
+    path:  C:\kubernetes\cni\10-ovn-kubernetes.conf
+    state: absent
+#  args:
+#    stdin: interface portproxy add v4tov4 listenport=2375 connectaddress=127.0.0.1 connectport=2375 listenaddress={{ inventory_hostname }} protocol=tcp
+  register: opvariable
+  tags:
+    - experiment2
+
+- name: Copy 10-ovn-kubernetes.conf file keeping the filename
+  win_copy:
+    src: 10-ovn-kubernetes.conf
+    dest: C:\kubernetes\cni\
+  tags:
+    - experiment2
+
+- name: create directory for storing usercode
+  win_file:
+    path: C:\Users\Public\usercode
+    state: directory
+
+- name: Run command to create docker network
+  win_command: docker network create --driver=nat my-nat-network
+#  args:
+#    stdin: interface portproxy add v4tov4 listenport=2375 connectaddress=127.0.0.1 connectport=2375 listenaddress={{ inventory_hostname }} protocol=tcp
+  register: opvariable
+  tags:
+    - experiment
+  ignore_errors: yes
+
+- debug: msg={{ opvariable.cmd }}
+  tags:
+    - experiment
+
+- debug: msg={{ opvariable.rc }}
+  tags:
+    - experiment
+
+- debug: msg={{ opvariable.stdout_lines }}
+  tags:
+    - experiment
+
+- name: pull windowsservercore:1709 image
+  win_command: docker pull microsoft/windowsservercore:1709
+#  args:
+#    stdin: interface portproxy add v4tov4 listenport=2375 connectaddress=127.0.0.1 connectport=2375 listenaddress={{ inventory_hostname }} protocol=tcp
+  register: opvariable
+  tags:
+    - experiment
+
+- debug: msg={{ opvariable.cmd }}
+  tags:
+    - experiment
+
+- debug: msg={{ opvariable.rc }}
+  tags:
+    - experiment
+
+- debug: msg={{ opvariable.stdout_lines }}
+  tags:
+    - experiment
+
+
+- name: delete the daemon.json file if it exists (should have existed)
+  win_file:
+    path: "C:\\ProgramData\\docker\\config\\daemon.json"
+    state: absent
+#  args:
+#    stdin: interface portproxy add v4tov4 listenport=2375 connectaddress=127.0.0.1 connectport=2375 listenaddress={{ inventory_hostname }} protocol=tcp
+  register: opvariable
+  tags:
+    - experiment2
+
+- name: Copy daemon.json file keeping the filename
+  win_copy:
+    src: daemon.json
+    dest: C:\ProgramData\docker\config\
+  tags:
+    - experiment2
+
+- name: Restart docker service
+  win_shell: Restart-Service docker 
+#  args:
+#    stdin: interface portproxy add v4tov4 listenport=2375 connectaddress=127.0.0.1 connectport=2375 listenaddress={{ inventory_hostname }} protocol=tcp
+  register: opvariable
+  tags:
+    - experiment
+
+- debug: msg={{ opvariable.cmd }}
+  tags:
+    - experiment
+
+- debug: msg={{ opvariable.rc }}
+  tags:
+    - experiment
+
+- debug: msg={{ opvariable.stdout_lines }}
+  tags:
+    - experiment
+
+-pause:
+    seconds: 30
+
+- name: Run rss container
+  win_command: docker run -d -p 8000:8000 -p 8384:8384 -p 22000:22000 -p 21027:21027/udp -v C:\Users\Public\usercode:C:\Users\Public\workspaces --network=my-nat-network registry2.swarm.devfactory.com/devfactory/rsswind3
+#  args:
+#    stdin: interface portproxy add v4tov4 listenport=2375 connectaddress=127.0.0.1 connectport=2375 listenaddress={{ inventory_hostname }} protocol=tcp
+  register: opvariable
+  ignore_errors: yes
+  tags:
+    - experiment
+
+- debug: msg={{ opvariable.cmd }}
+  tags:
+    - experiment
+
+- debug: msg={{ opvariable.rc }}
+  tags:
+    - experiment
+
+- debug: msg={{ opvariable.stdout_lines }}
+  tags:
+    - experiment
+
+- name: Run rsync container
+  win_command: docker run -d -p 22100:22 -v C:\Users\Public\usercode:C:\Users\root\workspaces --network=my-nat-network registry2.swarm.devfactory.com/devfactory/rsyncwind3
+#  args:
+#    stdin: interface portproxy add v4tov4 listenport=2375 connectaddress=127.0.0.1 connectport=2375 listenaddress={{ inventory_hostname }} protocol=tcp
+  register: opvariable
+  ignore_errors: yes
+  tags:
+    - experiment
+
+- debug: msg={{ opvariable.cmd }}
+  tags:
+    - experiment
+
+- debug: msg={{ opvariable.rc }}
+  tags:
+    - experiment
+
+- debug: msg={{ opvariable.stdout_lines }}
+  tags:
+    - experiment
