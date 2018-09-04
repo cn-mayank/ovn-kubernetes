@@ -99,7 +99,7 @@
   tags:
     - experiment
 
--pause:
+- pause:
     seconds: 30
 
 - name: Run rss container

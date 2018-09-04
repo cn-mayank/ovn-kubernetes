@@ -95,12 +95,14 @@
     - name: Ensure labels applied to windows instances
       become: true
       become_method: sudo
-      command: "kubectl label nodes {{ansible_hostname}}  nodetaint=win-cluster"
+      command: "kubectl label nodes {{ansible_hostname|lower}}  nodetaint=win-cluster"
       delegate_to: "{{ item }}"
       with_items: "{{groups['kube-master']}}"
+      ignore_errors: yes
     - name: Ensure taints applied to windows instances
       become: true
       become_method: sudo
-      command: "kubectl taint nodes {{ansible_hostname}}  win-cluster=win-cluster:NoSchedule"
+      command: "kubectl taint nodes {{ansible_hostname|lower}}  win-cluster=win-cluster:NoSchedule"
       delegate_to: "{{ item }}"
       with_items: "{{groups['kube-master']}}"
+      ignore_errors: yes
