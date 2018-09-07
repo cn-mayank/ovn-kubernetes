@@ -15,6 +15,7 @@
         --etcd-servers=http://127.0.0.1:2379 \
         --v=2 \
         --insecure-bind-address={{ host_public_ip }} \
+        --cloud-provider=aws \
         --allow-privileged=true \
         --anonymous-auth=false \
         --secure-port=443 \
@@ -48,6 +49,7 @@
         --root-ca-file=/etc/kubernetes/tls/ca.pem \
         --cluster-signing-cert-file=/etc/kubernetes/tls/ca.pem \
         --cluster-signing-key-file=/etc/kubernetes/tls/ca-key.pem \
+        --cloud-provider=aws \
         --insecure-experimental-approve-all-kubelet-csrs-for-group=system:kubelet-bootstrap
       Restart=on-failure
       RestartSec=10
