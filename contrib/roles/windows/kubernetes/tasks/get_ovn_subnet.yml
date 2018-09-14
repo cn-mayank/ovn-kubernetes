@@ -6,7 +6,7 @@
   block:
     - name: OVN subnet | Fetch ovn_host_annotation
       win_shell: |
-        {{ install_info.install_path }}/kubectl.exe describe node {{ aws_format_hostname }}  | sls ovn_host_subnet
+        {{ install_info.install_path }}/kubectl.exe describe node {{ ansible_hostname | lower }}  | sls ovn_host_subnet
       register: kubectl_annotation_output
       until: kubectl_annotation_output.stdout.find("ovn_host_subnet") != -1
       retries: 10
