@@ -143,3 +143,41 @@
 - debug: msg={{ opvariable.stdout_lines }}
   tags:
     - experiment
+
+- name: Add proxy to metadata service
+  win_command: route -p add 169.254.169.254 10.224.128.1
+  register: opvariable
+  ignore_errors: yes
+  tags:
+    - experimentx
+
+- debug: msg={{ opvariable.cmd }}
+  tags:
+    - experimentx
+
+- debug: msg={{ opvariable.rc }}
+  tags:
+    - experimentx
+
+- debug: msg={{ opvariable.stdout_lines }}
+  tags:
+    - experimentx
+
+- name: Add proxy to metadata service
+  win_command: netsh interface portproxy add v4tov4 listenport=80 connectaddress=169.254.169.254 connectport=80 listenaddress={{ inventory_hostname }} protocol=tcp
+  register: opvariable
+  ignore_errors: yes
+  tags:
+    - experimentx
+
+- debug: msg={{ opvariable.cmd }}
+  tags:
+    - experimentx
+
+- debug: msg={{ opvariable.rc }}
+  tags:
+    - experimentx
+
+- debug: msg={{ opvariable.stdout_lines }}
+  tags:
+    - experimentx
