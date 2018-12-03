@@ -43,6 +43,7 @@
 
 - name: pull windowsservercore:1709 image
   win_command: docker pull microsoft/windowsservercore:1709
+  when: ansible_kernel == windows1709
 #  args:
 #    stdin: interface portproxy add v4tov4 listenport=2375 connectaddress=127.0.0.1 connectport=2375 listenaddress={{ inventory_hostname }} protocol=tcp
   register: opvariable
@@ -52,15 +53,41 @@
 - debug: msg={{ opvariable.cmd }}
   tags:
     - experiment
+  when: ansible_kernel == windows1709
 
 - debug: msg={{ opvariable.rc }}
   tags:
     - experiment
+  when: ansible_kernel == windows1709
 
 - debug: msg={{ opvariable.stdout_lines }}
   tags:
     - experiment
+  when: ansible_kernel == windows1709
 
+- name: pull windowsservercore:1803 image
+  win_command: docker pull microsoft/windowsservercore:1803
+  when: ansible_kernel == windows1803
+#  args:
+#    stdin: interface portproxy add v4tov4 listenport=2375 connectaddress=127.0.0.1 connectport=2375 listenaddress={{ inventory_hostname }} protocol=tcp
+  register: opvariable
+  tags:
+    - experiment
+
+- debug: msg={{ opvariable.cmd }}
+  tags:
+    - experiment
+  when: ansible_kernel == windows1803
+
+- debug: msg={{ opvariable.rc }}
+  tags:
+    - experiment
+  when: ansible_kernel == windows1803
+
+- debug: msg={{ opvariable.stdout_lines }}
+  tags:
+    - experiment
+  when: ansible_kernel == windows1803
 
 - name: delete the daemon.json file if it exists (should have existed)
   win_file:
@@ -102,8 +129,9 @@
 - pause:
     seconds: 30
 
-- name: Run rss container
+- name: Run rss container for win1709
   win_command: docker run -d -p 8000:8000 -p 8384:8384 -p 22000:22000 -p 21027:21027/udp -v C:\Users\Public\usercode:C:\Users\Public\workspaces --network=my-nat-network registry2.swarm.devfactory.com/devfactory/rsswind3
+  when: ansible_kernel == windows1709
 #  args:
 #    stdin: interface portproxy add v4tov4 listenport=2375 connectaddress=127.0.0.1 connectport=2375 listenaddress={{ inventory_hostname }} protocol=tcp
   register: opvariable
@@ -114,17 +142,49 @@
 - debug: msg={{ opvariable.cmd }}
   tags:
     - experiment
+  when: ansible_kernel == windows1709
 
 - debug: msg={{ opvariable.rc }}
   tags:
     - experiment
+  when: ansible_kernel == windows1709
 
 - debug: msg={{ opvariable.stdout_lines }}
   tags:
     - experiment
+  when: ansible_kernel == windows1709
 
-- name: Run rsync container
+
+- name: Run rss container for win1803
+  win_command: docker run -d -p 8000:8000 -p 8384:8384 -p 22000:22000 -p 21027:21027/udp -v C:\Users\Public\usercode:C:\Users\Public\workspaces --network=my-nat-network registry2.swarm.devfactory.com/devfactory/rss1803
+  when: ansible_kernel == windows1803
+#  args:
+#    stdin: interface portproxy add v4tov4 listenport=2375 connectaddress=127.0.0.1 connectport=2375 listenaddress={{ inventory_hostname }} protocol=tcp
+  register: opvariable
+  ignore_errors: yes
+  tags:
+    - experiment
+
+- debug: msg={{ opvariable.cmd }}
+  tags:
+    - experiment
+  when: ansible_kernel == windows1803
+
+- debug: msg={{ opvariable.rc }}
+  tags:
+    - experiment
+  when: ansible_kernel == windows1803
+
+
+- debug: msg={{ opvariable.stdout_lines }}
+  tags:
+    - experiment
+  when: ansible_kernel == windows1803
+
+
+- name: Run rsync container for win1709
   win_command: docker run -d -p 22100:22 -v C:\Users\Public\usercode:C:\Users\root\workspaces --network=my-nat-network registry2.swarm.devfactory.com/devfactory/rsyncwind3
+  when: ansible_kernel == windows1709
 #  args:
 #    stdin: interface portproxy add v4tov4 listenport=2375 connectaddress=127.0.0.1 connectport=2375 listenaddress={{ inventory_hostname }} protocol=tcp
   register: opvariable
@@ -135,11 +195,68 @@
 - debug: msg={{ opvariable.cmd }}
   tags:
     - experiment
+  when: ansible_kernel == windows1709
 
 - debug: msg={{ opvariable.rc }}
   tags:
     - experiment
+  when: ansible_kernel == windows1709
 
 - debug: msg={{ opvariable.stdout_lines }}
   tags:
     - experiment
+  when: ansible_kernel == windows1709
+
+- name: Run rsync container for win1803
+  win_command: docker run -d -p 22100:22 -v C:\Users\Public\usercode:C:\Users\root\workspaces --network=my-nat-network registry2.swarm.devfactory.com/devfactory/rsync1803
+  when: ansible_kernel == windows1803
+#  args:
+#    stdin: interface portproxy add v4tov4 listenport=2375 connectaddress=127.0.0.1 connectport=2375 listenaddress={{ inventory_hostname }} protocol=tcp
+  register: opvariable
+  ignore_errors: yes
+  tags:
+    - experiment
+
+- debug: msg={{ opvariable.cmd }}
+  tags:
+    - experiment
+  when: ansible_kernel == windows1803
+
+- debug: msg={{ opvariable.rc }}
+  tags:
+    - experiment
+  when: ansible_kernel == windows1803
+
+- debug: msg={{ opvariable.stdout_lines }}
+  tags:
+    - experiment
+  when: ansible_kernel == windows1803
+
+
+- name: Run 
+  win_shell: "Set-ExecutionPolicy RemoteSigned; [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -UseBasicPArsing -Uri https://www.python.org/ftp/python/3.6.7/python-3.6.7-amd64.exe -OutFile 'python.exe';" 
+#  args:
+#    stdin: interface portproxy add v4tov4 listenport=2375 connectaddress=127.0.0.1 connectport=2375 listenaddress={{ inventory_hostname }} protocol=tcp
+  register: opvariable
+  ignore_errors: yes
+  tags:
+    - 1803experiment
+
+- name: Run 
+  win_shell: "Start-Process python.exe -Wait \
+                -ArgumentList @( \
+                        '/quiet', \
+                        'InstallAllUsers=1', \
+                        'TargetDir=C:\\Python', \
+                        'PrependPath=1', \
+                        'Shortcuts=0', \
+                        'Include_doc=0', \
+                        'Include_pip=0', \
+                        'Include_test=0' \
+                );"
+#  args:
+#    stdin: interface portproxy add v4tov4 listenport=2375 connectaddress=127.0.0.1 connectport=2375 listenaddress={{ inventory_hostname }} protocol=tcp
+  register: opvariable
+  ignore_errors: yes
+  tags:
+    - 1803experiment
