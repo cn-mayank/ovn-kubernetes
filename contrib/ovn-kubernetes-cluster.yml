@@ -114,6 +114,7 @@
       become: true
       become_method: sudo
       command: "kubectl label nodes {{ansible_hostname|lower}}  nodetaint=win1803"
+      when: ansible_kernel == windows1803
       delegate_to: "{{ item }}"
       with_items: "{{groups['kube-master']}}"
       ignore_errors: yes
@@ -121,7 +122,28 @@
       become: true
       become_method: sudo
       command: "kubectl taint nodes {{ansible_hostname|lower}}  win1803=win1803:NoSchedule"
+      when: ansible_kernel == windows1803
       delegate_to: "{{ item }}"
       with_items: "{{groups['kube-master']}}"
       ignore_errors: yes
 ### linux
+    - name: Ensure labels applied to linux instances
+      become: true
+      become_method: sudo
+      command: "kubectl label nodes {{ansible_hostname|lower}}  nodetaint=linux"
+      when:
+        - ansible_kernel != windows1709
+        - ansible_kernel != windows1803
+      delegate_to: "{{ item }}"
+      with_items: "{{groups['kube-master']}}"
+      ignore_errors: yes
+    - name: Ensure taints applied to linux instances
+      become: true
+      become_method: sudo
+      command: "kubectl taint nodes {{ansible_hostname|lower}}  linux=linux:NoSchedule"
+      when:
+        - ansible_kernel != windows1709
+        - ansible_kernel != windows1803
+      delegate_to: "{{ item }}"
+      with_items: "{{groups['kube-master']}}"
+      ignore_errors: yes
