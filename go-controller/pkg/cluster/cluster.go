@@ -14,13 +14,12 @@ import (
 
 // OvnClusterController is the object holder for utilities meant for cluster management
 type OvnClusterController struct {
-	Kube                  kube.Interface
-	watchFactory          *factory.WatchFactory
-	masterSubnetAllocator *netutils.SubnetAllocator
+	Kube                      kube.Interface
+	watchFactory              *factory.WatchFactory
+	masterSubnetAllocatorList []*netutils.SubnetAllocator
 
-	ClusterIPNet          *net.IPNet
 	ClusterServicesSubnet string
-	HostSubnetLength      uint32
+	ClusterIPNet          []CIDRNetworkEntry
 
 	GatewayInit      bool
 	GatewayIntf      string
@@ -32,6 +31,12 @@ type OvnClusterController struct {
 	LocalnetGateway  bool
 }
 
+// CIDRNetworkEntry is the object that holds the definition for a single network CIDR range
+type CIDRNetworkEntry struct {
+	CIDR             *net.IPNet
+	HostSubnetLength uint32
+}
+
 const (
 	// OvnHostSubnet is the constant string representing the annotation key
 	OvnHostSubnet = "ovn_host_subnet"
@@ -39,6 +44,8 @@ const (
 	DefaultNamespace = "default"
 	// MasterOverlayIP is the overlay IP address on master node
 	MasterOverlayIP = "master_overlay_ip"
+	// OvnClusterRouter is the name of the distributed router
+	OvnClusterRouter = "ovn_cluster_router"
 )
 
 // NewClusterController creates a new controller for IP subnet allocation to
@@ -84,7 +91,7 @@ func setOVSExternalIDs(nodeName string, ids ...string) error {
 	return nil
 }
 
-func setupOVNNode(nodeName, kubeServer, kubeToken, kubeCACert string) error {
+func setupOVNNode(nodeName string) error {
 	// Tell ovn-*bctl how to talk to the database
 	for _, auth := range []*config.OvnDBAuth{
 		config.OvnNorth.ClientAuth,
