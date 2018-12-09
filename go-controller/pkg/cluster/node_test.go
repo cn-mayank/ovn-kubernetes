@@ -2,10 +2,6 @@ package cluster
 
 import (
 	"fmt"
-	"io/ioutil"
-	"os"
-	"path/filepath"
-	"testing"
 
 	"github.com/urfave/cli"
 	fakeexec "k8s.io/utils/exec/testing"
@@ -18,34 +14,8 @@ import (
 	. "github.com/onsi/gomega"
 )
 
-func TestClusterNode(t *testing.T) {
-	RegisterFailHandler(Fail)
-	RunSpecs(t, "Cluster Node Suite")
-}
-
-var tmpDir string
-
-var _ = AfterSuite(func() {
-	err := os.RemoveAll(tmpDir)
-	Expect(err).NotTo(HaveOccurred())
-})
-
-func createTempFile(name string) (string, error) {
-	fname := filepath.Join(tmpDir, name)
-	if err := ioutil.WriteFile(fname, []byte{0x20}, 0644); err != nil {
-		return "", err
-	}
-	return fname, nil
-}
-
 var _ = Describe("Node Operations", func() {
-	var tmpErr error
 	var app *cli.App
-
-	tmpDir, tmpErr = ioutil.TempDir("", "clusternodetest_certdir")
-	if tmpErr != nil {
-		GinkgoT().Errorf("failed to create tempdir: %v", tmpErr)
-	}
 
 	BeforeEach(func() {
 		// Restore global default values before each testcase
@@ -58,14 +28,9 @@ var _ = Describe("Node Operations", func() {
 
 	It("sets correct OVN external IDs", func() {
 		app.Action = func(ctx *cli.Context) error {
-			cacert, err := createTempFile("kube-cacert.pem")
-			Expect(err).NotTo(HaveOccurred())
-
 			const (
-				nodeName  string = "1.2.5.6"
-				apiserver string = "https://1.2.3.4:8080"
-				token     string = "adsfadsfasdfasdfasfaf"
-				interval  int    = 100000
+				nodeName string = "1.2.5.6"
+				interval int    = 100000
 			)
 
 			fakeCmds := ovntest.AddFakeCmd(nil, &ovntest.ExpectedCmd{
@@ -83,13 +48,13 @@ var _ = Describe("Node Operations", func() {
 				},
 			}
 
-			err = util.SetExec(fexec)
+			err := util.SetExec(fexec)
 			Expect(err).NotTo(HaveOccurred())
 
 			_, err = config.InitConfig(ctx, fexec, nil)
 			Expect(err).NotTo(HaveOccurred())
 
-			err = setupOVNNode(nodeName, apiserver, token, cacert)
+			err = setupOVNNode(nodeName)
 			Expect(err).NotTo(HaveOccurred())
 
 			Expect(fexec.CommandCalls).To(Equal(len(fakeCmds)))

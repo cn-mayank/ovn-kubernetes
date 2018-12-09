@@ -2,7 +2,6 @@ package cluster
 
 import (
 	"net"
-	"runtime"
 	"time"
 
 	"github.com/sirupsen/logrus"
@@ -15,10 +14,6 @@ import (
 	"k8s.io/client-go/tools/cache"
 )
 
-const (
-	windowsOS = "windows"
-)
-
 // StartClusterNode learns the subnet assigned to it by the master controller
 // and calls the SetupNode script which establishes the logical switch
 func (cluster *OvnClusterController) StartClusterNode(name string) error {
@@ -26,6 +21,11 @@ func (cluster *OvnClusterController) StartClusterNode(name string) error {
 	var err error
 	var node *kapi.Node
 	var subnet *net.IPNet
+	var clusterSubnets []string
+
+	for _, clusterSubnet := range cluster.ClusterIPNet {
+		clusterSubnets = append(clusterSubnets, clusterSubnet.CIDR.String())
+	}
 
 	for count > 0 {
 		if count != 300 {
@@ -60,25 +60,20 @@ func (cluster *OvnClusterController) StartClusterNode(name string) error {
 
 	logrus.Infof("Node %s ready for ovn initialization with subnet %s", node.Name, subnet.String())
 
-	err = setupOVNNode(name, config.Kubernetes.APIServer, config.Kubernetes.Token,
-		config.Kubernetes.CACert)
+	err = setupOVNNode(name)
 	if err != nil {
 		return err
 	}
 
 	err = ovn.CreateManagementPort(node.Name, subnet.String(),
-		cluster.ClusterIPNet.String(),
-		cluster.ClusterServicesSubnet)
+		cluster.ClusterServicesSubnet,
+		clusterSubnets)
 	if err != nil {
 		return err
 	}
 
 	if cluster.GatewayInit {
-		if runtime.GOOS == windowsOS {
-			panic("Windows is not supported as a gateway node")
-		}
-		err = cluster.initGateway(node.Name, cluster.ClusterIPNet.String(),
-			subnet.String())
+		err = cluster.initGateway(node.Name, clusterSubnets, subnet.String())
 		if err != nil {
 			return err
 		}
@@ -109,28 +104,29 @@ func (cluster *OvnClusterController) updateOvnNode(masterIP string,
 	if err != nil {
 		return err
 	}
-	err = setupOVNNode(node.Name, config.Kubernetes.APIServer,
-		config.Kubernetes.Token, config.Kubernetes.CACert)
+	err = setupOVNNode(node.Name)
 	if err != nil {
 		logrus.Errorf("Failed to setup OVN node (%v)", err)
 		return err
 	}
 
+	var clusterSubnets []string
+
+	for _, clusterSubnet := range cluster.ClusterIPNet {
+		clusterSubnets = append(clusterSubnets, clusterSubnet.CIDR.String())
+	}
+
 	// Recreate logical switch and management port for this node
 	err = ovn.CreateManagementPort(node.Name, subnet,
-		cluster.ClusterIPNet.String(),
-		cluster.ClusterServicesSubnet)
+		cluster.ClusterServicesSubnet,
+		clusterSubnets)
 	if err != nil {
 		return err
 	}
 
 	// Reinit Gateway for this node if the --init-gateways flag is set
 	if cluster.GatewayInit {
-		if runtime.GOOS == windowsOS {
-			panic("Windows is not supported as a gateway node")
-		}
-		err = cluster.initGateway(node.Name, cluster.ClusterIPNet.String(),
-			subnet)
+		err = cluster.initGateway(node.Name, clusterSubnets, subnet)
 		if err != nil {
 			return err
 		}
@@ -153,7 +149,7 @@ func (cluster *OvnClusterController) watchNamespaceUpdate(node *kapi.Node,
 				if newMasterIP != oldMasterIP {
 					err := cluster.updateOvnNode(newMasterIP, node, subnet)
 					if err != nil {
-						logrus.Errorf("Failed to update OVN node with new ",
+						logrus.Errorf("Failed to update OVN node with new "+
 							"masterIP %s: %v", newMasterIP, err)
 					}
 				}

@@ -46,10 +46,10 @@
     - name: Ensure /etc/hosts is updated on kube-master
       lineinfile:
         path: /etc/hosts
-        regexp: '{{ansible_hostname}}$'
-        line: '{{host_public_ip}} {{ansible_hostname}}'
+        regexp: ' {{ ansible_hostname | lower }}$'
+        line: '{{ host_public_ip }} {{ ansible_hostname | lower }}'
       delegate_to: "{{ item }}"
-      with_items: "{{groups['kube-master']}}"
+      with_items: "{{ groups['kube-master'] }}"
     - name: Ensure labels applied to linux instances
       tags:
       - experiment7dec
@@ -57,7 +57,7 @@
       become_method: sudo
       command: "kubectl label nodes {{ansible_hostname|lower}}  nodetaint=linux"
       delegate_to: "{{ item }}"
-      with_items: "{{groups['kube-master']}}"
+      with_items: "{{ groups['kube-master'] }}"
       ignore_errors: yes
     - name: Ensure taints applied to linux instances
       tags:
@@ -66,14 +66,18 @@
       become_method: sudo
       command: "kubectl taint nodes {{ansible_hostname|lower}}  linux=linux:NoSchedule"
       delegate_to: "{{ item }}"
-      with_items: "{{groups['kube-master']}}"
+      with_items: "{{ groups['kube-master'] }}"
       ignore_errors: yes
+      with_items: "{{ groups['kube-master'] }}"
 
 - hosts: kube-minions-windows
   remote_user: Administrator
   gather_facts: true
   become_method: runas
   any_errors_fatal: true
+  vars:
+    # This will init the gateway on the first minion from the hosts
+    init_gateway: true
   tasks:
     - set_fact:
         windows_container_tag: 1709
@@ -84,6 +88,8 @@
     - import_role:
         name: windows/version_check
     - import_role:
+        name: windows/requirements
+    - import_role:
         name: windows/docker
     - import_role:
         name: windows/openvswitch
@@ -93,10 +99,10 @@
         # to install the MSI in unattended mode
         # Setting install_beta_ovs to false will install the latest stable OVS
         install_custom_ovs: true
-        custom_ovs_link: "https://balutoiu.com/ionut/OpenvSwitch.msi"
-        ovs_certs_link: "https://docs.google.com/uc?export=download&id=1tGbGalZ6gDQOgjQuWAfIqGCNy-9RTpAF"
+        custom_ovs_link: "https://cloudbase.it/downloads/openvswitch-hyperv-installer-beta.msi"
         # This is useful for dev purposes and when using custom MSI which is not signed
-        bcdedit_needed: true
+        bcdedit_needed: false
+        # ovs_certs_link: ""  # link to certificates for OVS if required
     - import_role:
         name: windows/ovn-kubernetes
     - import_role:
@@ -106,10 +112,10 @@
       become_method: sudo
       lineinfile:
         path: /etc/hosts
-        regexp: '{{ansible_hostname}}$'
-        line: '{{host_public_ip}} {{ansible_hostname}}'
+        regexp: ' {{ ansible_hostname | lower }}$'
+        line: '{{ host_public_ip }} {{ ansible_hostname | lower }}'
       delegate_to: "{{ item }}"
-      with_items: "{{groups['kube-master']}}"
+      with_items: "{{ groups['kube-master'] }}"
 ### 1709
     - name: Ensure labels applied to windows1709 instances
       become: true
@@ -125,7 +131,7 @@
       command: "kubectl taint nodes {{ansible_hostname|lower}}  win1709=win1709:NoSchedule"
       when: ansible_kernel == windows1709
       delegate_to: "{{ item }}"
-      with_items: "{{groups['kube-master']}}"
+      with_items: "{{ groups['kube-master'] }}"
       ignore_errors: yes
 ###1803
     - name: Ensure labels applied to windows1803 instances
@@ -142,6 +148,5 @@
       command: "kubectl taint nodes {{ansible_hostname|lower}}  win1803=win1803:NoSchedule"
       when: ansible_kernel == windows1803
       delegate_to: "{{ item }}"
-      with_items: "{{groups['kube-master']}}"
+      with_items: "{{ groups['kube-master'] }}"
       ignore_errors: yes
-### linux
