@@ -50,25 +50,25 @@
         line: '{{ host_public_ip }} {{ ansible_hostname | lower }}'
       delegate_to: "{{ item }}"
       with_items: "{{ groups['kube-master'] }}"
-    - name: Ensure labels applied to linux instances
-      tags:
-      - experiment7dec
-      become: true
-      become_method: sudo
-      command: "kubectl label nodes {{ansible_hostname|lower}}  nodetaint=linux"
-      delegate_to: "{{ item }}"
-      with_items: "{{ groups['kube-master'] }}"
-      ignore_errors: yes
-    - name: Ensure taints applied to linux instances
-      tags:
-      - experiment7dec
-      become: true
-      become_method: sudo
-      command: "kubectl taint nodes {{ansible_hostname|lower}}  linux=linux:NoSchedule"
-      delegate_to: "{{ item }}"
-      with_items: "{{ groups['kube-master'] }}"
-      ignore_errors: yes
-      with_items: "{{ groups['kube-master'] }}"
+#    - name: Ensure labels applied to linux instances
+#      tags:
+#      - experiment7dec
+#      become: true
+#      become_method: sudo
+#      command: "kubectl label nodes {{ansible_hostname|lower}}  nodetaint=linux"
+#      delegate_to: "{{ item }}"
+#      with_items: "{{ groups['kube-master'] }}"
+#      ignore_errors: yes
+#    - name: Ensure taints applied to linux instances
+#      tags:
+#      - experiment7dec
+#      become: true
+#      become_method: sudo
+#      command: "kubectl taint nodes {{ansible_hostname|lower}}  linux=linux:NoSchedule"
+#      delegate_to: "{{ item }}"
+#      with_items: "{{ groups['kube-master'] }}"
+#      ignore_errors: yes
+#      with_items: "{{ groups['kube-master'] }}"
 
 - hosts: kube-minions-windows
   remote_user: Administrator
