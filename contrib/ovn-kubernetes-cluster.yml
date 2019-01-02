@@ -24,9 +24,6 @@
   any_errors_fatal: true
   gather_facts: true
   become: true
-  vars:
-    # This will init the gateway on the first minion from the hosts
-    init_gateway: true
   tasks:
     - import_role:
         name: linux/version_check
@@ -75,9 +72,6 @@
   gather_facts: true
   become_method: runas
   any_errors_fatal: true
-  vars:
-    # This will init the gateway on the first minion from the hosts
-    init_gateway: true
   tasks:
     - set_fact:
         windows_container_tag: 1709
@@ -85,6 +79,9 @@
     - set_fact:
         windows_container_tag: 1803
       when: ansible_kernel == windows1803
+    - set_fact:
+        windows_container_tag: 1809
+      when: ansible_kernel == windows2019
     - import_role:
         name: windows/version_check
     - import_role:
@@ -150,3 +147,33 @@
       delegate_to: "{{ item }}"
       with_items: "{{ groups['kube-master'] }}"
       ignore_errors: yes
+
+# TODO(ionutbalutoiu):
+# Remove below workaround when this is fixed: https://github.com/openvswitch/ovn-kubernetes/issues/531
+# Right now, the CoreDNS pods will never reach "running" state. We need to kill the existing pods and
+# new ones will be successfully created.
+- hosts: kube-master
+  any_errors_fatal: true
+  gather_facts: true
+  become: true
+  tasks:
+    - name: Kill the kube-dns pods
+      run_once: true
+      shell: kubectl delete pod --force --grace-period=0 --namespace kube-system --selector k8s-app=kube-dns
+
+- hosts: kube-master:kube-minions-linux
+  any_errors_fatal: true
+  gather_facts: true
+  become: true
+  tasks:
+    - import_role:
+        name: linux/validation
+
+- hosts: kube-minions-windows
+  remote_user: Administrator
+  gather_facts: true
+  become_method: runas
+  any_errors_fatal: true
+  tasks:
+    - import_role:
+        name: windows/validation
