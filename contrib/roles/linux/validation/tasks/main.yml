@@ -1,0 +1,64 @@
+---
+- name: Linux validation | include vars
+  include_vars: "{{ ansible_distribution | lower }}.yml"
+
+- name: Linux validation | Set the service_names fact
+  block:
+    - name: Linux validation | Set the Linux master service names
+      set_fact:
+        service_names: "{{ master_service_names }}"
+      when: master
+
+    - name: Linux validation | Set the Linux minion service names
+      set_fact:
+        service_names: "{{ minion_service_names }}"
+      when: minion
+
+- name: Linux validation | Validate the services success state
+  include: "./validate_service.yml service_name={{ item }}"
+  with_items: "{{ service_names }}"
+
+- name: Linux validation | Validate if the CoreDNS pods are running
+  run_once: true
+  block:
+    - name: Linux validation | Create temp file for Python script
+      tempfile:
+        state: file
+      register: python_script
+
+    - name: Linux validation | Set the Python script content
+      blockinfile:
+        path: "{{ python_script.path }}"
+        create: yes
+        block: |
+          import json
+          import sys
+          pods = json.load(sys.stdin)
+          for pod in pods['items']:
+              if pod['status']['phase'] != 'Running':
+                  #
+                  # More info about pod phase here:
+                  # https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/#pod-phase
+                  #
+                  print('ERROR: Pod %s is not running.'
+                        'Current phase is: %s' % (pod['metadata']['name'],
+                                                  pod['status']['phase']))
+                  sys.exit(1)
+              print('Pod %s is running.' % (pod['metadata']['name']))
+
+    - name: Linux validation | Check the CoreDNS pods
+      retries: 10
+      delay: 5
+      register: result
+      shell: |
+        set -o pipefail
+        kubectl get pod --selector k8s-app=kube-dns --namespace kube-system --output json | python3 "{{ python_script.path }}"
+      args:
+        executable: /bin/bash
+      until: result.rc == 0
+
+    - name: Linux validation | Cleanup the temp Python script file
+      file:
+        path: "{{ python_script.path }}"
+        state: absent
+  when: master
