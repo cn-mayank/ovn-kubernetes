@@ -147,6 +147,23 @@
       delegate_to: "{{ item }}"
       with_items: "{{ groups['kube-master'] }}"
       ignore_errors: yes
+###1809
+    - name: Ensure labels applied to windows1809 instances
+      become: true
+      become_method: sudo
+      command: "kubectl label nodes {{ansible_hostname|lower}}  nodetaint=win1809"
+      when: ansible_kernel == windows2019
+      delegate_to: "{{ item }}"
+      with_items: "{{groups['kube-master']}}"
+      ignore_errors: yes
+    - name: Ensure taints applied to windows1809 instances
+      become: true
+      become_method: sudo
+      command: "kubectl taint nodes {{ansible_hostname|lower}}  win1809=win1809:NoSchedule"
+      when: ansible_kernel == windows2019
+      delegate_to: "{{ item }}"
+      with_items: "{{ groups['kube-master'] }}"
+      ignore_errors: yes
 
 # TODO(ionutbalutoiu):
 # Remove below workaround when this is fixed: https://github.com/openvswitch/ovn-kubernetes/issues/531
