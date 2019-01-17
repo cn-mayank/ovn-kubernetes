@@ -57,33 +57,15 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: ovn-cluster-reader
-roleRef:
-  name: cluster-reader
-  kind: ClusterRole
-subjects:
-- kind: ServiceAccount
-  name: ovn
-  namespace: ovn-kubernetes
-userNames:
-- system:serviceaccount:ovn-kubernetes:ovn
-groupNames: []
-
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
-metadata:
   name: ovn-reader
 roleRef:
   name: system:ovn-reader
   kind: ClusterRole
+  apiGroup: rbac.authorization.k8s.io
 subjects:
 - kind: ServiceAccount
   name: ovn
   namespace: ovn-kubernetes
-userNames:
-- system:serviceaccount:ovn-kubernetes:ovn
-groupNames: []
 
 ---
 apiVersion: rbac.authorization.k8s.io/v1
@@ -93,11 +75,8 @@ metadata:
 roleRef:
   name: cluster-admin
   kind: ClusterRole
+  apiGroup: rbac.authorization.k8s.io
 subjects:
 - kind: ServiceAccount
   name: ovn
   namespace: ovn-kubernetes
-userNames:
-- system:serviceaccount:ovn-kubernetes:ovn
-groupNames: []
-

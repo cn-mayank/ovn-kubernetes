@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync/atomic"
 	"time"
 	"unicode"
 
@@ -133,16 +134,24 @@ func GetExec() kexec.Interface {
 	return runner.exec
 }
 
+var runCounter uint64
+
 func run(cmdPath string, args ...string) (*bytes.Buffer, *bytes.Buffer, error) {
 	stdout := &bytes.Buffer{}
 	stderr := &bytes.Buffer{}
 	cmd := runner.exec.Command(cmdPath, args...)
 	cmd.SetStdout(stdout)
 	cmd.SetStderr(stderr)
-	logrus.Debugf("exec: %s %s", cmdPath, strings.Join(args, " "))
+
+	counter := atomic.AddUint64(&runCounter, 1)
+	logCmd := fmt.Sprintf("%s %s", cmdPath, strings.Join(args, " "))
+	logrus.Debugf("exec(%d): %s", counter, logCmd)
+
 	err := cmd.Run()
+	logrus.Debugf("exec(%d): stdout: %q", counter, stdout)
+	logrus.Debugf("exec(%d): stderr: %q", counter, stderr)
 	if err != nil {
-		logrus.Debugf("exec: %s %s => %v", cmdPath, strings.Join(args, " "), err)
+		logrus.Debugf("exec(%d): err: %v", counter, err)
 	}
 	return stdout, stderr, err
 }
@@ -195,18 +204,6 @@ func RunOVNNbctlUnix(args ...string) (string, string, error) {
 	stdout, stderr, err := runOVNretry(runner.nbctlPath, cmdArgs...)
 	return strings.Trim(strings.TrimFunc(stdout.String(), unicode.IsSpace), "\""),
 		stderr.String(), err
-}
-
-// RunOVNNbctlHA connects to multiple servers if they are provided as an input.
-// If there is a single server provided, it assumes that it is local and uses
-// Unix domain sockets for the connection.
-func RunOVNNbctlHA(args ...string) (string, string, error) {
-	ovnNorthAddress := config.OvnNorth.ClientAuth.OvnAddressForClient
-	ovnNorthAddresses := strings.Split(ovnNorthAddress, ",")
-	if len(ovnNorthAddresses) == 1 {
-		return RunOVNNbctlUnix(args...)
-	}
-	return RunOVNNbctl(args...)
 }
 
 // RunOVNNbctlWithTimeout runs command via ovn-nbctl with a specific timeout

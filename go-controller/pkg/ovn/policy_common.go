@@ -2,7 +2,8 @@ package ovn
 
 import (
 	"fmt"
-	util "github.com/openvswitch/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/factory"
+	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/sirupsen/logrus"
 	knet "k8s.io/api/networking/v1"
 	"net"
@@ -12,16 +13,16 @@ import (
 
 type namespacePolicy struct {
 	sync.Mutex
-	name             string
-	namespace        string
-	ingressPolicies  []*gressPolicy
-	egressPolicies   []*gressPolicy
-	podHandlerIDList []uint64
-	nsHandlerIDList  []uint64
-	localPods        map[string]bool //pods effected by this policy
-	portGroupUUID    string          //uuid for OVN port_group
-	portGroupName    string
-	deleted          bool //deleted policy
+	name            string
+	namespace       string
+	ingressPolicies []*gressPolicy
+	egressPolicies  []*gressPolicy
+	podHandlerList  []*factory.Handler
+	nsHandlerList   []*factory.Handler
+	localPods       map[string]bool //pods effected by this policy
+	portGroupUUID   string          //uuid for OVN port_group
+	portGroupName   string
+	deleted         bool //deleted policy
 }
 
 type gressPolicy struct {
@@ -174,7 +175,7 @@ const (
 )
 
 func (oc *Controller) addAllowACLFromNode(logicalSwitch string) {
-	uuid, stderr, err := util.RunOVNNbctlHA("--data=bare", "--no-heading",
+	uuid, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading",
 		"--columns=_uuid", "find", "ACL",
 		fmt.Sprintf("external-ids:logical_switch=%s", logicalSwitch),
 		"external-ids:node-acl=yes")
@@ -188,7 +189,7 @@ func (oc *Controller) addAllowACLFromNode(logicalSwitch string) {
 		return
 	}
 
-	subnet, stderr, err := util.RunOVNNbctlHA("get", "logical_switch",
+	subnet, stderr, err := util.RunOVNNbctl("get", "logical_switch",
 		logicalSwitch, "other-config:subnet")
 	if err != nil {
 		logrus.Errorf("failed to get the logical_switch %s subnet, "+
@@ -214,7 +215,7 @@ func (oc *Controller) addAllowACLFromNode(logicalSwitch string) {
 
 	match := fmt.Sprintf("match=\"ip4.src == %s\"", address)
 
-	_, stderr, err = util.RunOVNNbctlHA("--id=@acl", "create", "acl",
+	_, stderr, err = util.RunOVNNbctl("--id=@acl", "create", "acl",
 		fmt.Sprintf("priority=%s", defaultAllowPriority),
 		"direction=to-lport", match, "action=allow-related",
 		fmt.Sprintf("external-ids:logical_switch=%s", logicalSwitch),
@@ -255,10 +256,10 @@ func (oc *Controller) deleteNetworkPolicy(
 }
 
 func (oc *Controller) shutdownHandlers(np *namespacePolicy) {
-	for _, id := range np.podHandlerIDList {
-		_ = oc.watchFactory.RemovePodHandler(id)
+	for _, handler := range np.podHandlerList {
+		_ = oc.watchFactory.RemovePodHandler(handler)
 	}
-	for _, id := range np.nsHandlerIDList {
-		_ = oc.watchFactory.RemoveNamespaceHandler(id)
+	for _, handler := range np.nsHandlerList {
+		_ = oc.watchFactory.RemoveNamespaceHandler(handler)
 	}
 }

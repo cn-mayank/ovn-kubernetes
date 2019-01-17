@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"github.com/sirupsen/logrus"
 	"net"
+	"runtime"
 	"strings"
 )
 
@@ -39,77 +40,87 @@ func getLocalSystemID() (string, error) {
 	return localSystemID, nil
 }
 
-func lockNBForGateways() error {
-	localSystemID, err := getLocalSystemID()
+// GetDefaultGatewayRouterIP returns the first gateway logical router name
+// and IP address as listed in the OVN database
+func GetDefaultGatewayRouterIP() (string, net.IP, error) {
+	stdout, stderr, err := RunOVNNbctl("--data=bare", "--format=table",
+		"--no-heading", "--columns=name,options", "find", "logical_router",
+		"options:lb_force_snat_ip!=-")
 	if err != nil {
-		return err
+		return "", nil, fmt.Errorf("failed to get logical routers, stdout: %q, "+
+			"stderr: %q, err: %v", stdout, stderr, err)
 	}
-
-	stdout, stderr, err := RunOVNNbctlWithTimeout(60, "--", "wait-until",
-		"nb_global", ".", "external-ids:gateway-lock=\"\"", "--", "set",
-		"nb_global", ".", "external_ids:gateway-lock="+localSystemID)
-	if err != nil {
-		return fmt.Errorf("Failed to set gateway-lock "+
-			"stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
+	// Convert \r\n to \n to support Windows line endings
+	stdout = strings.Replace(strings.TrimSpace(stdout), "\r\n", "\n", -1)
+	gatewayRouters := strings.Split(stdout, "\n")
+	if len(gatewayRouters) == 0 {
+		return "", nil, fmt.Errorf("failed to get default gateway router (no routers found)")
 	}
-	return nil
-}
-
-func unlockNBForGateways() {
-	stdout, stderr, err := RunOVNNbctl("--", "set", "nb_global", ".",
-		"external-ids:gateway-lock=\"\"")
-	if err != nil {
-		logrus.Errorf("Failed to delete lock for gateways, "+
-			"stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
-	}
-}
-
-func generateGatewayIP() (string, error) {
-	// All the routers connected to "join" switch are in 100.64.1.0/24
-	// network and they have their external_ids:connect_to_join set.
-	stdout, stderr, err := RunOVNNbctl("--data=bare", "--no-heading",
-		"--columns=network", "find", "logical_router_port",
-		"external_ids:connect_to_join=yes")
-	if err != nil {
-		logrus.Errorf("Failed to get logical router ports which connect to "+
-			"\"join\" switch, stdout: %q, stderr: %q, error: %v",
-			stdout, stderr, err)
-		return "", err
-	}
-	ips := strings.Split(strings.TrimSpace(stdout), "\n")
-
-	ipStart, ipStartNet, _ := net.ParseCIDR("100.64.1.0/24")
-	ipMax, _, _ := net.ParseCIDR("100.64.1.255/24")
-	n, _ := ipStartNet.Mask.Size()
-	for !ipStart.Equal(ipMax) {
-		ipStart = NextIP(ipStart)
-		used := 0
-		for _, v := range ips {
-			ipCompare, _, _ := net.ParseCIDR(v)
-			if ipStart.String() == ipCompare.String() {
-				used = 1
-				break
-			}
-		}
-		if used == 1 {
-			continue
-		} else {
+	parts := strings.Fields(gatewayRouters[0])
+	var ip net.IP
+	for _, p := range parts {
+		const forceTag string = "lb_force_snat_ip="
+		if strings.HasPrefix(p, forceTag) {
+			ip = net.ParseIP(p[len(forceTag):])
 			break
 		}
 	}
-	ipMask := fmt.Sprintf("%s/%d", ipStart.String(), n)
-	return ipMask, nil
+	if ip == nil {
+		return "", nil, fmt.Errorf("failed to parse gateway router %q IP", parts[0])
+	}
+	return parts[0], ip, nil
+}
+
+func ensureGatewayPortAddress(portName string) (string, *net.IPNet, error) {
+	routerMac, routerIP, _ := GetPortAddresses(portName, false)
+	if routerMac == "" || routerIP == "" {
+		// Create the gateway switch port in 'join' if it doesn't exist yet
+		stdout, stderr, err := RunOVNNbctl("--wait=sb",
+			"--may-exist", "lsp-add", "join", portName,
+			"--", "--if-exists", "clear", "logical_switch_port", portName, "dynamic_addresses",
+			"--", "lsp-set-addresses", portName, "dynamic")
+		if err != nil {
+			return "", nil, fmt.Errorf("failed to add logical switch "+
+				"port %s, stdout: %q, stderr: %q, error: %v",
+				portName, stdout, stderr, err)
+		}
+		// Should have an address already since we waited for the SB above
+		routerMac, routerIP, err = GetPortAddresses(portName, false)
+		if err != nil {
+			return "", nil, fmt.Errorf("error while waiting for addresses "+
+				"for gateway switch port %q: %v", portName, err)
+		}
+		if routerMac == "" || routerIP == "" {
+			return "", nil, fmt.Errorf("empty addresses for gateway "+
+				"switch port %q", portName)
+		}
+	}
+
+	// Grab the 'join' switch prefix length to add to our gateway router's IP
+	joinPrefixLen, stderr, err := RunOVNNbctl("--if-exists", "get",
+		"logical_switch", "join", "external-ids:join-subnet-prefix-length")
+	if err != nil {
+		return "", nil, fmt.Errorf("Failed to get 'join' switch external-ids: "+
+			"stderr: %q, %v", stderr, err)
+	}
+	stringCIDR := routerIP + "/" + joinPrefixLen
+	ip, cidr, err := net.ParseCIDR(stringCIDR)
+	if err != nil {
+		return "", nil, fmt.Errorf("Invalid router CIDR %q: %v", stringCIDR, err)
+	}
+	cidr.IP = ip
+
+	return routerMac, cidr, nil
 }
 
 // GatewayInit creates a gateway router for the local chassis.
-func GatewayInit(clusterIPSubnet, nodeName, nicIP, physicalInterface,
+func GatewayInit(clusterIPSubnet []string, nodeName, nicIP, physicalInterface,
 	bridgeInterface, defaultGW, rampoutIPSubnet string,
 	gatewayLBEnable bool) error {
 
 	ip, physicalIPNet, err := net.ParseCIDR(nicIP)
 	if err != nil {
-		logrus.Errorf("error parsing %s (%v)", nicIP, err)
-		return err
+		return fmt.Errorf("error parsing %s (%v)", nicIP, err)
 	}
 	n, _ := physicalIPNet.Mask.Size()
 	physicalIPMask := fmt.Sprintf("%s/%d", ip.String(), n)
@@ -136,91 +147,58 @@ func GatewayInit(clusterIPSubnet, nodeName, nicIP, physicalInterface,
 		gatewayRouter, "--", "set", "logical_router", gatewayRouter,
 		"options:chassis="+systemID, "external_ids:physical_ip="+physicalIP)
 	if err != nil {
-		logrus.Errorf("Failed to create logical router %v, stdout: %q, "+
+		return fmt.Errorf("Failed to create logical router %v, stdout: %q, "+
 			"stderr: %q, error: %v", gatewayRouter, stdout, stderr, err)
+	}
+
+	gwSwitchPort := "jtor-" + gatewayRouter
+	gwRouterPort := "rtoj-" + gatewayRouter
+	routerMac, routerCIDR, err := ensureGatewayPortAddress(gwSwitchPort)
+	if err != nil {
 		return err
 	}
 
-	// Connect gateway router to switch "join".
-	routerMac, stderr, err := RunOVNNbctl("--if-exist", "get",
-		"logical_router_port", "rtoj-"+gatewayRouter, "mac")
+	// Must move the IP from the LSP to the LRP and set the LSP addresses
+	// to 'router' in one transaction, because IPAM doesn't consider LSPs that
+	// are attached to routers when checking reserved addresses.
+	stdout, stderr, err = RunOVNNbctl(
+		"--", "--may-exist", "lrp-add", gatewayRouter, gwRouterPort, routerMac, routerCIDR.String(),
+		"--", "set", "logical_switch_port", gwSwitchPort, "type=router",
+		"options:router-port="+gwRouterPort, "addresses=router")
 	if err != nil {
-		logrus.Errorf("Failed to get logical router port, stderr: %q, "+
-			"error: %v", stderr, err)
-		return err
-	}
-
-	var routerIP string
-	if routerMac == "" {
-		routerMac = GenerateMac()
-		if err = func() error {
-			err = lockNBForGateways()
-			if err != nil {
-				return err
-			}
-			defer unlockNBForGateways()
-			routerIP, err = generateGatewayIP()
-			if err != nil {
-				return err
-			}
-
-			stdout, stderr, err = RunOVNNbctl("--", "--may-exist", "lrp-add",
-				gatewayRouter, "rtoj-"+gatewayRouter, routerMac, routerIP,
-				"--", "set", "logical_router_port", "rtoj-"+gatewayRouter,
-				"external_ids:connect_to_join=yes")
-			if err != nil {
-				return fmt.Errorf("failed to add logical port to router, stdout: %q, "+
-					"stderr: %q, error: %v", stdout, stderr, err)
-			}
-			return nil
-		}(); err != nil {
-			logrus.Errorf(err.Error())
-			return err
-		}
-	}
-
-	if routerIP == "" {
-		stdout, stderr, err = RunOVNNbctl("--if-exists", "get",
-			"logical_router_port", "rtoj-"+gatewayRouter, "networks")
-		if err != nil {
-			logrus.Errorf("failed to get routerIP for %s "+
-				"stdout: %q, stderr: %q, error: %v",
-				"rtoj-"+gatewayRouter, stdout, stderr, err)
-			return err
-		}
-		routerIP = strings.Trim(stdout, "[]\"")
-	}
-
-	// Connect the switch "join" to the router.
-	stdout, stderr, err = RunOVNNbctl("--", "--may-exist", "lsp-add",
-		"join", "jtor-"+gatewayRouter, "--", "set", "logical_switch_port",
-		"jtor-"+gatewayRouter, "type=router",
-		"options:router-port=rtoj-"+gatewayRouter,
-		"addresses="+"\""+routerMac+"\"")
-	if err != nil {
-		logrus.Errorf("Failed to add logical port to switch, stdout: %q, "+
+		return fmt.Errorf("failed to add logical port to router, stdout: %q, "+
 			"stderr: %q, error: %v", stdout, stderr, err)
-		return err
 	}
 
-	// Add a static route in GR with distributed router as the nexthop.
-	stdout, stderr, err = RunOVNNbctl("--may-exist", "lr-route-add",
-		gatewayRouter, clusterIPSubnet, "100.64.1.1")
+	stdout, stderr, err = RunOVNNbctl("set", "logical_router",
+		gatewayRouter, "options:lb_force_snat_ip="+routerCIDR.IP.String())
 	if err != nil {
-		logrus.Errorf("Failed to add a static route in GR with distributed "+
-			"router as the nexthop, stdout: %q, stderr: %q, error: %v",
-			stdout, stderr, err)
-		return err
+		return fmt.Errorf("Failed to set logical router, stdout: %q, "+
+			"stderr: %q, error: %v", stdout, stderr, err)
+	}
+
+	for _, entry := range clusterIPSubnet {
+		// Add a static route in GR with distributed router as the nexthop.
+		stdout, stderr, err = RunOVNNbctl("--may-exist", "lr-route-add",
+			gatewayRouter, entry, "100.64.0.1")
+		if err != nil {
+			return fmt.Errorf("Failed to add a static route in GR with distributed "+
+				"router as the nexthop, stdout: %q, stderr: %q, error: %v",
+				stdout, stderr, err)
+		}
 	}
 
 	// Add a default route in distributed router with first GR as the nexthop.
-	stdout, stderr, err = RunOVNNbctl("--may-exist", "lr-route-add",
-		k8sClusterRouter, "0.0.0.0/0", "100.64.1.2")
+	_, defGatewayIP, err := GetDefaultGatewayRouterIP()
 	if err != nil {
-		logrus.Errorf("Failed to add a default route in distributed router "+
+		return err
+	}
+	stdout, stderr, err = RunOVNNbctl("--may-exist", "lr-route-add",
+		k8sClusterRouter, "0.0.0.0/0", defGatewayIP.String())
+	if err != nil {
+		return fmt.Errorf("Failed to add a default route in distributed router "+
 			"with first GR as the nexthop, stdout: %q, stderr: %q, error: %v",
 			stdout, stderr, err)
-		return err
 	}
 
 	if gatewayLBEnable {
@@ -231,18 +209,16 @@ func GatewayInit(clusterIPSubnet, nodeName, nicIP, physicalInterface,
 			"--columns=_uuid", "find", "load_balancer",
 			"external_ids:TCP_lb_gateway_router="+gatewayRouter)
 		if err != nil {
-			logrus.Errorf("Failed to get k8sNSLbTCP, stderr: %q, error: %v",
+			return fmt.Errorf("Failed to get k8sNSLbTCP, stderr: %q, error: %v",
 				stderr, err)
-			return err
 		}
 		if k8sNSLbTCP == "" {
 			k8sNSLbTCP, stderr, err = RunOVNNbctl("--", "create",
 				"load_balancer",
 				"external_ids:TCP_lb_gateway_router="+gatewayRouter)
 			if err != nil {
-				logrus.Errorf("Failed to create load balancer, stdout: %q, "+
-					"stderr: %q, error: %v", stdout, stderr, err)
-				return err
+				return fmt.Errorf("Failed to create load balancer: "+
+					"stderr: %q, error: %v", stderr, err)
 			}
 		}
 
@@ -250,9 +226,8 @@ func GatewayInit(clusterIPSubnet, nodeName, nicIP, physicalInterface,
 			"--columns=_uuid", "find", "load_balancer",
 			"external_ids:UDP_lb_gateway_router="+gatewayRouter)
 		if err != nil {
-			logrus.Errorf("Failed to get k8sNSLbUDP, stderr: %q, error: %v",
+			return fmt.Errorf("Failed to get k8sNSLbUDP, stderr: %q, error: %v",
 				stderr, err)
-			return err
 		}
 		if k8sNSLbUDP == "" {
 			k8sNSLbUDP, stderr, err = RunOVNNbctl("--", "create",
@@ -260,9 +235,8 @@ func GatewayInit(clusterIPSubnet, nodeName, nicIP, physicalInterface,
 				"external_ids:UDP_lb_gateway_router="+gatewayRouter,
 				"protocol=udp")
 			if err != nil {
-				logrus.Errorf("Failed to create load balancer, stdout: %q, "+
-					"stderr: %q, error: %v", stdout, stderr, err)
-				return err
+				return fmt.Errorf("Failed to create load balancer: "+
+					"stderr: %q, error: %v", stderr, err)
 			}
 		}
 
@@ -270,18 +244,16 @@ func GatewayInit(clusterIPSubnet, nodeName, nicIP, physicalInterface,
 		stdout, stderr, err = RunOVNNbctl("set", "logical_router",
 			gatewayRouter, "load_balancer="+k8sNSLbTCP)
 		if err != nil {
-			logrus.Errorf("Failed to set north-south load-balancers to the "+
+			return fmt.Errorf("Failed to set north-south load-balancers to the "+
 				"gateway router, stdout: %q, stderr: %q, error: %v",
 				stdout, stderr, err)
-			return err
 		}
 		stdout, stderr, err = RunOVNNbctl("add", "logical_router",
 			gatewayRouter, "load_balancer", k8sNSLbUDP)
 		if err != nil {
-			logrus.Errorf("Failed to add north-south load-balancers to the "+
+			return fmt.Errorf("Failed to add north-south load-balancers to the "+
 				"gateway router, stdout: %q, stderr: %q, error: %v",
 				stdout, stderr, err)
-			return err
 		}
 	}
 
@@ -290,9 +262,8 @@ func GatewayInit(clusterIPSubnet, nodeName, nicIP, physicalInterface,
 	stdout, stderr, err = RunOVNNbctl("--may-exist", "ls-add",
 		externalSwitch)
 	if err != nil {
-		logrus.Errorf("Failed to create logical switch, stdout: %q, "+
+		return fmt.Errorf("Failed to create logical switch, stdout: %q, "+
 			"stderr: %q, error: %v", stdout, stderr, err)
-		return err
 	}
 
 	var ifaceID, macAddress string
@@ -303,16 +274,14 @@ func GatewayInit(clusterIPSubnet, nodeName, nicIP, physicalInterface,
 			"br-int", physicalInterface, "--", "set", "interface",
 			physicalInterface, "external-ids:iface-id="+ifaceID)
 		if err != nil {
-			logrus.Errorf("Failed to add port to br-int, stdout: %q, "+
+			return fmt.Errorf("Failed to add port to br-int, stdout: %q, "+
 				"stderr: %q, error: %v", stdout, stderr, err)
-			return err
 		}
 		macAddress, stderr, err = RunOVSVsctl("--if-exists", "get",
 			"interface", physicalInterface, "mac_in_use")
 		if err != nil {
-			logrus.Errorf("Failed to get macAddress, stderr: %q, error: %v",
+			return fmt.Errorf("Failed to get macAddress, stderr: %q, error: %v",
 				stderr, err)
-			return err
 		}
 
 		// Flush the IP address of the physical interface.
@@ -326,19 +295,23 @@ func GatewayInit(clusterIPSubnet, nodeName, nicIP, physicalInterface,
 		macAddress, stderr, err = RunOVSVsctl("--if-exists", "get",
 			"interface", bridgeInterface, "mac_in_use")
 		if err != nil {
-			logrus.Errorf("Failed to get macAddress, stderr: %q, error: %v",
+			return fmt.Errorf("Failed to get macAddress, stderr: %q, error: %v",
 				stderr, err)
-			return err
 		}
 		if macAddress == "" {
 			return fmt.Errorf("No mac_address found for the bridge-interface")
 		}
+		if runtime.GOOS == windowsOS && macAddress == "00:00:00:00:00:00" {
+			macAddress, err = FetchIfMacWindows(bridgeInterface)
+			if err != nil {
+				return err
+			}
+		}
 		stdout, stderr, err = RunOVSVsctl("set", "bridge",
 			bridgeInterface, "other-config:hwaddr="+macAddress)
 		if err != nil {
-			logrus.Errorf("Failed to set bridge, stdout: %q, stderr: %q, "+
+			return fmt.Errorf("Failed to set bridge, stdout: %q, stderr: %q, "+
 				"error: %v", stdout, stderr, err)
-			return err
 		}
 		ifaceID = bridgeInterface + "_" + nodeName
 
@@ -350,18 +323,16 @@ func GatewayInit(clusterIPSubnet, nodeName, nicIP, physicalInterface,
 			bridgeInterface, patch2, "--", "set", "interface", patch2,
 			"type=patch", "options:peer="+patch1)
 		if err != nil {
-			logrus.Errorf("Failed to add port, stdout: %q, stderr: %q, "+
+			return fmt.Errorf("Failed to add port, stdout: %q, stderr: %q, "+
 				"error: %v", stdout, stderr, err)
-			return err
 		}
 
 		stdout, stderr, err = RunOVSVsctl("--may-exist", "add-port",
 			"br-int", patch1, "--", "set", "interface", patch1, "type=patch",
 			"options:peer="+patch2, "external-ids:iface-id="+ifaceID)
 		if err != nil {
-			logrus.Errorf("Failed to add port, stdout: %q, stderr: %q, "+
+			return fmt.Errorf("Failed to add port, stdout: %q, stderr: %q, "+
 				"error: %v", stdout, stderr, err)
-			return err
 		}
 	}
 
@@ -371,9 +342,8 @@ func GatewayInit(clusterIPSubnet, nodeName, nicIP, physicalInterface,
 	stdout, stderr, err = RunOVNNbctl("--", "--may-exist", "lsp-add",
 		externalSwitch, ifaceID, "--", "lsp-set-addresses", ifaceID, "unknown")
 	if err != nil {
-		logrus.Errorf("Failed to add logical port to switch, stdout: %q, "+
+		return fmt.Errorf("Failed to add logical port to switch, stdout: %q, "+
 			"stderr: %q, error: %v", stdout, stderr, err)
-		return err
 	}
 
 	// Connect GR to external_switch with mac address of external interface
@@ -383,9 +353,8 @@ func GatewayInit(clusterIPSubnet, nodeName, nicIP, physicalInterface,
 		"--", "set", "logical_router_port", "rtoe-"+gatewayRouter,
 		"external-ids:gateway-physical-ip=yes")
 	if err != nil {
-		logrus.Errorf("Failed to add logical port to router, stdout: %q, "+
+		return fmt.Errorf("Failed to add logical port to router, stdout: %q, "+
 			"stderr: %q, error: %v", stdout, stderr, err)
-		return err
 	}
 
 	// Connect the external_switch to the router.
@@ -395,9 +364,8 @@ func GatewayInit(clusterIPSubnet, nodeName, nicIP, physicalInterface,
 		"options:router-port=rtoe-"+gatewayRouter,
 		"addresses="+"\""+macAddress+"\"")
 	if err != nil {
-		logrus.Errorf("Failed to add logical port to router, stdout: %q, "+
+		return fmt.Errorf("Failed to add logical port to router, stdout: %q, "+
 			"stderr: %q, error: %v", stdout, stderr, err)
-		return err
 	}
 
 	// Add a static route in GR with physical gateway as the default next hop.
@@ -406,59 +374,46 @@ func GatewayInit(clusterIPSubnet, nodeName, nicIP, physicalInterface,
 			gatewayRouter, "0.0.0.0/0", defaultGW,
 			fmt.Sprintf("rtoe-%s", gatewayRouter))
 		if err != nil {
-			logrus.Errorf("Failed to add a static route in GR with physical "+
+			return fmt.Errorf("Failed to add a static route in GR with physical "+
 				"gateway as the default next hop, stdout: %q, "+
 				"stderr: %q, error: %v", stdout, stderr, err)
-			return err
 		}
 	}
 
 	// Default SNAT rules.
-	stdout, stderr, err = RunOVNNbctl("--may-exist", "lr-nat-add",
-		gatewayRouter, "snat", physicalIP, clusterIPSubnet)
-	if err != nil {
-		logrus.Errorf("Failed to create default SNAT rules, stdout: %q, "+
-			"stderr: %q, error: %v", stdout, stderr, err)
-		return err
+	for _, entry := range clusterIPSubnet {
+		stdout, stderr, err = RunOVNNbctl("--may-exist", "lr-nat-add",
+			gatewayRouter, "snat", physicalIP, entry)
+		if err != nil {
+			return fmt.Errorf("Failed to create default SNAT rules, stdout: %q, "+
+				"stderr: %q, error: %v", stdout, stderr, err)
+		}
 	}
 
 	// When there are multiple gateway routers (which would be the likely
 	// default for any sane deployment), we need to SNAT traffic
 	// heading to the logical space with the Gateway router's IP so that
 	// return traffic comes back to the same gateway router.
-	if routerIP != "" {
-		routerIPByte, _, err := net.ParseCIDR(routerIP)
-		if err != nil {
-			return err
-		}
-		stdout, stderr, err = RunOVNNbctl("set", "logical_router",
-			gatewayRouter, "options:lb_force_snat_ip="+routerIPByte.String())
-		if err != nil {
-			logrus.Errorf("Failed to set logical router, stdout: %q, "+
-				"stderr: %q, error: %v", stdout, stderr, err)
-			return err
-		}
-		if rampoutIPSubnet != "" {
-			rampoutIPSubnets := strings.Split(rampoutIPSubnet, ",")
-			for _, rampoutIPSubnet = range rampoutIPSubnets {
-				_, _, err = net.ParseCIDR(rampoutIPSubnet)
-				if err != nil {
-					continue
-				}
+	if rampoutIPSubnet != "" {
+		rampoutIPSubnets := strings.Split(rampoutIPSubnet, ",")
+		for _, rampoutIPSubnet = range rampoutIPSubnets {
+			_, _, err = net.ParseCIDR(rampoutIPSubnet)
+			if err != nil {
+				continue
+			}
 
-				// Add source IP address based routes in distributed router
-				// for this gateway router.
-				stdout, stderr, err = RunOVNNbctl("--may-exist",
-					"--policy=src-ip", "lr-route-add", k8sClusterRouter,
-					rampoutIPSubnet, routerIPByte.String())
-				if err != nil {
-					logrus.Errorf("Failed to add source IP address based "+
-						"routes in distributed router, stdout: %q, "+
-						"stderr: %q, error: %v", stdout, stderr, err)
-					return err
-				}
+			// Add source IP address based routes in distributed router
+			// for this gateway router.
+			stdout, stderr, err = RunOVNNbctl("--may-exist",
+				"--policy=src-ip", "lr-route-add", k8sClusterRouter,
+				rampoutIPSubnet, routerCIDR.IP.String())
+			if err != nil {
+				return fmt.Errorf("Failed to add source IP address based "+
+					"routes in distributed router, stdout: %q, "+
+					"stderr: %q, error: %v", stdout, stderr, err)
 			}
 		}
 	}
+
 	return nil
 }
