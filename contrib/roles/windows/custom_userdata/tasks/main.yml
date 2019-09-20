@@ -372,3 +372,57 @@
 - debug: msg={{ opvariable.stdout_lines }}
   tags:
     - experimentx
+
+### 1709
+- name: Ensure labels applied to windows1709 instances
+  become: true
+  become_method: sudo
+  command: "kubectl label nodes {{ansible_hostname|lower}}  nodetaint=win1709"
+  when: ansible_kernel == windows1709
+  delegate_to: "{{ item }}"
+  with_items: "{{groups['kube-master']}}"
+  ignore_errors: yes
+- name: Ensure taints applied to windows1709 instances
+  become: true
+  become_method: sudo
+  command: "kubectl taint nodes {{ansible_hostname|lower}}  win1709=win1709:NoSchedule"
+  when: ansible_kernel == windows1709
+  delegate_to: "{{ item }}"
+  with_items: "{{ groups['kube-master'] }}"
+  ignore_errors: yes
+###1803
+- name: Ensure labels applied to windows1803 instances
+  become: true
+  become_method: sudo
+  command: "kubectl label nodes {{ansible_hostname|lower}}  nodetaint=win1803"
+  when: ansible_kernel == windows1803
+  delegate_to: "{{ item }}"
+  with_items: "{{groups['kube-master']}}"
+  ignore_errors: yes
+- name: Ensure taints applied to windows1803 instances
+  become: true
+  become_method: sudo
+  command: "kubectl taint nodes {{ansible_hostname|lower}}  win1803=win1803:NoSchedule"
+  when: ansible_kernel == windows1803
+  delegate_to: "{{ item }}"
+  with_items: "{{ groups['kube-master'] }}"
+  ignore_errors: yes
+###1809
+- name: Ensure labels applied to windows1809 instances
+  become: true
+#  gather_facts: true
+  become_method: sudo
+  command: "kubectl label nodes {{ansible_hostname|lower}}  nodetaint=win1809"
+  when: ansible_kernel == windows2019
+  delegate_to: "{{ item }}"
+  with_items: "{{groups['kube-master']}}"
+  ignore_errors: yes
+- name: Ensure taints applied to windows1809 instances
+  become: true
+#  gather_facts: true
+  become_method: sudo
+  command: "kubectl taint nodes {{ansible_hostname|lower}}  win1809=win1809:NoSchedule"
+  when: ansible_kernel == windows2019
+  delegate_to: "{{ item }}"
+  with_items: "{{ groups['kube-master'] }}"
+  ignore_errors: yes

@@ -1,15 +1,14 @@
 [kube-master]
-10.224.134.157
+10.224.131.227
 
 [kube-master:vars]
 ansible_python_interpreter=/usr/bin/python3
 
 [kube-minions-linux]
-10.224.139.40
+10.224.137.59
 
 [kube-minions-linux:vars]
 ansible_python_interpreter=/usr/bin/python3
 
 [kube-minions-windows]
-10.224.136.73
-10.224.142.234
+10.224.209.10
