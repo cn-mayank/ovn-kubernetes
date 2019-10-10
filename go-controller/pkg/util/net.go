@@ -5,6 +5,8 @@ import (
 	"math/big"
 	"math/rand"
 	"net"
+	"runtime"
+	"strings"
 	"time"
 )
 
@@ -31,4 +33,57 @@ func ipToInt(ip net.IP) *big.Int {
 
 func intToIP(i *big.Int) net.IP {
 	return net.IP(i.Bytes())
+}
+
+// GetPortAddresses returns the MAC and IP of the given logical switch port
+func GetPortAddresses(portName string) (net.HardwareAddr, net.IP, error) {
+	out, _, err := RunOVNNbctl("get", "logical_switch_port", portName, "dynamic_addresses")
+	if err != nil {
+		return nil, nil, fmt.Errorf("Error while obtaining addresses for %s: %v", portName, err)
+	}
+	if out == "[]" {
+		// No addresses
+		return nil, nil, nil
+	}
+
+	// dynamic addresses have format "0a:00:00:00:00:01 192.168.1.3".
+	outStr := strings.Trim(out, `"`)
+	addresses := strings.Split(outStr, " ")
+	if len(addresses) != 2 {
+		return nil, nil, fmt.Errorf("Error while obtaining addresses for %s", portName)
+	}
+	ip := net.ParseIP(addresses[1])
+	if ip == nil {
+		return nil, nil, fmt.Errorf("failed to parse logical switch port %q IP %q", portName, addresses[1])
+	}
+	mac, err := net.ParseMAC(addresses[0])
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to parse logical switch port %q MAC %q: %v", portName, addresses[0], err)
+	}
+	return mac, ip, nil
+}
+
+// GetOVSPortMACAddress returns the MAC address of a given OVS port
+func GetOVSPortMACAddress(portName string) (string, error) {
+	macAddress, stderr, err := RunOVSVsctl("--if-exists", "get",
+		"interface", portName, "mac_in_use")
+	if err != nil {
+		return "", fmt.Errorf("failed to get MAC address for %q, stderr: %q, error: %v",
+			portName, stderr, err)
+	}
+	if macAddress == "[]" {
+		return "", fmt.Errorf("no mac_address found for %q", portName)
+	}
+	if runtime.GOOS == windowsOS && macAddress == "00:00:00:00:00:00" {
+		// There is a known issue with OVS not correctly picking up the
+		// physical network interface MAC address.
+		stdout, stderr, err := RunPowershell("$(Get-NetAdapter", "-IncludeHidden",
+			"-InterfaceAlias", fmt.Sprintf("\"%s\"", portName), ").MacAddress")
+		if err != nil {
+			return "", fmt.Errorf("failed to get mac address of %q, stderr: %q, error: %v", portName, stderr, err)
+		}
+		// Windows returns it in 00-00-00-00-00-00 format, we want ':' instead of '-'
+		macAddress = strings.ToLower(strings.Replace(stdout, "-", ":", -1))
+	}
+	return macAddress, nil
 }

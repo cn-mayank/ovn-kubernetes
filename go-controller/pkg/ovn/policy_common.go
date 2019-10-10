@@ -2,26 +2,28 @@ package ovn
 
 import (
 	"fmt"
-	util "github.com/openvswitch/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/sirupsen/logrus"
 	knet "k8s.io/api/networking/v1"
 	"net"
 	"sort"
+	"strings"
 	"sync"
 )
 
 type namespacePolicy struct {
 	sync.Mutex
-	name             string
-	namespace        string
-	ingressPolicies  []*gressPolicy
-	egressPolicies   []*gressPolicy
-	podHandlerIDList []uint64
-	nsHandlerIDList  []uint64
-	localPods        map[string]bool //pods effected by this policy
-	portGroupUUID    string          //uuid for OVN port_group
-	portGroupName    string
-	deleted          bool //deleted policy
+	name            string
+	namespace       string
+	ingressPolicies []*gressPolicy
+	egressPolicies  []*gressPolicy
+	podHandlerList  []*factory.Handler
+	nsHandlerList   []*factory.Handler
+	localPods       map[string]bool //pods effected by this policy
+	portGroupUUID   string          //uuid for OVN port_group
+	portGroupName   string
+	deleted         bool //deleted policy
 }
 
 type gressPolicy struct {
@@ -41,9 +43,9 @@ type gressPolicy struct {
 	// the rule in question.
 	portPolicies []*portPolicy
 
-	// ipBlock represents the CIDR IP block from which traffic is allowed
+	// ipBlockCidr represents the CIDR from which traffic is allowed
 	// except the IP block in the except, which should be dropped.
-	ipBlockCidr   string
+	ipBlockCidr   []string
 	ipBlockExcept []string
 }
 
@@ -68,6 +70,8 @@ func newGressPolicy(policyType knet.PolicyType, idx int) *gressPolicy {
 		peerAddressSets:       make(map[string]bool),
 		sortedPeerAddressSets: make([]string, 0),
 		portPolicies:          make([]*portPolicy, 0),
+		ipBlockCidr:           make([]string, 0),
+		ipBlockExcept:         make([]string, 0),
 	}
 }
 
@@ -79,8 +83,8 @@ func (gp *gressPolicy) addPortPolicy(portJSON *knet.NetworkPolicyPort) {
 }
 
 func (gp *gressPolicy) addIPBlock(ipblockJSON *knet.IPBlock) {
-	gp.ipBlockCidr = ipblockJSON.CIDR
-	gp.ipBlockExcept = append([]string{}, ipblockJSON.Except...)
+	gp.ipBlockCidr = append(gp.ipBlockCidr, ipblockJSON.CIDR)
+	gp.ipBlockExcept = append(gp.ipBlockExcept, ipblockJSON.Except...)
 }
 
 func (gp *gressPolicy) getL3MatchFromAddressSet() string {
@@ -106,21 +110,22 @@ func (gp *gressPolicy) getL3MatchFromAddressSet() string {
 
 func (gp *gressPolicy) getMatchFromIPBlock(lportMatch, l4Match string) string {
 	var match string
+	ipBlockCidr := fmt.Sprintf("{%s}", strings.Join(gp.ipBlockCidr, ", "))
 	if gp.policyType == knet.PolicyTypeIngress {
 		if l4Match == noneMatch {
-			match = fmt.Sprintf("match=\"ip4.src == {%s} && %s\"",
-				gp.ipBlockCidr, lportMatch)
+			match = fmt.Sprintf("match=\"ip4.src == %s && %s\"",
+				ipBlockCidr, lportMatch)
 		} else {
-			match = fmt.Sprintf("match=\"ip4.src == {%s} && %s && %s\"",
-				gp.ipBlockCidr, l4Match, lportMatch)
+			match = fmt.Sprintf("match=\"ip4.src == %s && %s && %s\"",
+				ipBlockCidr, l4Match, lportMatch)
 		}
 	} else {
 		if l4Match == noneMatch {
-			match = fmt.Sprintf("match=\"ip4.dst == {%s} && %s\"",
-				gp.ipBlockCidr, lportMatch)
+			match = fmt.Sprintf("match=\"ip4.dst == %s && %s\"",
+				ipBlockCidr, lportMatch)
 		} else {
-			match = fmt.Sprintf("match=\"ip4.dst == {%s} && %s && %s\"",
-				gp.ipBlockCidr, l4Match, lportMatch)
+			match = fmt.Sprintf("match=\"ip4.dst == %s && %s && %s\"",
+				ipBlockCidr, l4Match, lportMatch)
 		}
 	}
 	return match
@@ -173,37 +178,23 @@ const (
 	ipBlockDenyPriority = "1010"
 )
 
-func (oc *Controller) addAllowACLFromNode(logicalSwitch string) {
-	uuid, stderr, err := util.RunOVNNbctlHA("--data=bare", "--no-heading",
-		"--columns=_uuid", "find", "ACL",
-		fmt.Sprintf("external-ids:logical_switch=%s", logicalSwitch),
-		"external-ids:node-acl=yes")
-	if err != nil {
-		logrus.Errorf("find failed to get the node acl for "+
-			"logical_switch=%s, stderr: %q, (%v)", logicalSwitch, stderr, err)
-		return
-	}
-
-	if uuid != "" {
-		return
-	}
-
-	subnet, stderr, err := util.RunOVNNbctlHA("get", "logical_switch",
+func (oc *Controller) addAllowACLFromNode(logicalSwitch string) error {
+	subnet, stderr, err := util.RunOVNNbctl("get", "logical_switch",
 		logicalSwitch, "other-config:subnet")
 	if err != nil {
 		logrus.Errorf("failed to get the logical_switch %s subnet, "+
 			"stderr: %q (%v)", logicalSwitch, stderr, err)
-		return
+		return err
 	}
 
 	if subnet == "" {
-		return
+		return fmt.Errorf("logical_switch %q had no subnet", logicalSwitch)
 	}
 
 	ip, _, err := net.ParseCIDR(subnet)
 	if err != nil {
 		logrus.Errorf("failed to parse subnet %s", subnet)
-		return
+		return err
 	}
 
 	// K8s only supports IPv4 right now. The second IP address of the
@@ -212,19 +203,15 @@ func (oc *Controller) addAllowACLFromNode(logicalSwitch string) {
 	ip[3] = ip[3] + 2
 	address := ip.String()
 
-	match := fmt.Sprintf("match=\"ip4.src == %s\"", address)
-
-	_, stderr, err = util.RunOVNNbctlHA("--id=@acl", "create", "acl",
-		fmt.Sprintf("priority=%s", defaultAllowPriority),
-		"direction=to-lport", match, "action=allow-related",
-		fmt.Sprintf("external-ids:logical_switch=%s", logicalSwitch),
-		"external-ids:node-acl=yes",
-		"--", "add", "logical_switch", logicalSwitch, "acls", "@acl")
+	match := fmt.Sprintf("ip4.src==%s", address)
+	_, stderr, err = util.RunOVNNbctl("--may-exist", "acl-add", logicalSwitch,
+		"to-lport", defaultAllowPriority, match, "allow-related")
 	if err != nil {
 		logrus.Errorf("failed to create the node acl for "+
 			"logical_switch=%s, stderr: %q (%v)", logicalSwitch, stderr, err)
-		return
 	}
+
+	return err
 }
 
 func (oc *Controller) syncNetworkPolicies(networkPolicies []interface{}) {
@@ -255,10 +242,10 @@ func (oc *Controller) deleteNetworkPolicy(
 }
 
 func (oc *Controller) shutdownHandlers(np *namespacePolicy) {
-	for _, id := range np.podHandlerIDList {
-		_ = oc.watchFactory.RemovePodHandler(id)
+	for _, handler := range np.podHandlerList {
+		_ = oc.watchFactory.RemovePodHandler(handler)
 	}
-	for _, id := range np.nsHandlerIDList {
-		_ = oc.watchFactory.RemoveNamespaceHandler(id)
+	for _, handler := range np.nsHandlerList {
+		_ = oc.watchFactory.RemoveNamespaceHandler(handler)
 	}
 }

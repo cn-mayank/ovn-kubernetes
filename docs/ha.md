@@ -86,13 +86,13 @@ IP3="$MASTER3"
 ovn_nb="tcp://$IP1:6641,tcp://$IP2:6641,tcp://$IP3:6641"
 ovn_sb="tcp://$IP1:6642,tcp://$IP2:6642,tcp://$IP3:6642"
 
-nohup sudo ovnkube -k8s-kubeconfig kubeconfig.yaml -net-controller \
+nohup sudo ovnkube -k8s-kubeconfig kubeconfig.yaml \
  -loglevel=4 \
  -k8s-apiserver="http://$K8S_APISERVER_IP:8080" \
  -logfile="/var/log/openvswitch/ovnkube.log" \
- -init-master="$NODENAME" -cluster-subnet="$CLUSTER_IP_SUBNET" \
+ -init-master="$NODENAME" -cluster-subnets="$CLUSTER_IP_SUBNET" \
  -init-node="$NODENAME" \
- -service-cluster-ip-range="$SERVICE_IP_SUBNET" \
+ -k8s-service-cidr="$SERVICE_IP_SUBNET" \
  -k8s-token="$TOKEN" \
  -nodeport \
  -nb-address="${ovn_nb}" \
@@ -138,6 +138,6 @@ nohup sudo ovnkube -k8s-kubeconfig $HOME/kubeconfig.yaml -loglevel=4 \
     -sb-address="${ovn_sb}" \
     -k8s-token="$TOKEN" \
     -init-gateways \
-    -service-cluster-ip-range= \
-    -cluster-subnet="$SERVICE_IP_SUBNET" 2>&1 &
+    -k8s-service-cidr= \
+    -cluster-subnets="$SERVICE_IP_SUBNET" 2>&1 &
 ```

@@ -17,7 +17,7 @@ ovn_master=${OVN_MASTER:-"false"}
 ovn_host=$(hostname)
 
 # Cluster's internal network cidr
-ovn_cidr=$(OVN_CIDR:-"10.128.0.0/14"}
+ovn_cidr=${OVN_CIDR:-"10.128.0.0/14"}
 
 # Used to test for ovn-northd coming up
 ovn_nbdb=${OVN_TEST_NDB:-"tcp:10.19.188.22:6641"}
@@ -28,6 +28,10 @@ ovn_northd_opts=${OVN_NORTHD_OPTS:-"--db-nb-sock=/var/run/openvswitch/ovnnb_db.s
 # ovn-controller
 #OVN_CONTROLLER_OPTS="--ovn-controller-log=-vconsole:emer --vsyslog:err -vfile:info"
 ovn_controller_opts=${OVN_CONTROLLER_OPTS:-"--ovn-controller-log=-vconsole:emer"}
+
+# set the default values for the daemon and the command to be run for that daemon.
+daemon=${1:-"all"}
+cmd=${2:-"check"}
 
 # =========================================
 
@@ -40,7 +44,7 @@ wait_for_northdb () {
   while true; do
     # northd is up when this works
     out=$(ovn-nbctl --db${ovn_nbdb} show >/dev/null)
-    if [[ ${out} .ne 0 ]] ; then
+    if [[ ${out} -ne 0 ]] ; then
       echo "info: Waiting for ovn-northd to come up, waiting 10s ..." 2>&1
       sleep 10 & wait
       (( retries += 1 ))
@@ -121,11 +125,10 @@ ovn-master () {
   "start") echo "ovn-master - START"
 	 if [ ! -f /var/run/openvswitch/ovnkube-master.pid ] ; then
 	 /usr/bin/ovnkube \
-           --cluster-subnet "${ovn_cidr}" \
+           --cluster-subnets "${ovn_cidr}" \
            --init-master ${ovn_host} \
 	   --pidfile /var/run/openvswitch/ovnkube-master.pid \
-	   --logfile /var/log/openvswitch/ovnkube-master.log \
-           --net-controller &
+	   --logfile /var/log/ovn-kubernetes/ovnkube-master.log &
 	 fi
 	 ;;
   "stop") echo "ovn-master - STOP"
@@ -147,7 +150,7 @@ ovn-master () {
 	 ;;
   "logs") echo "ovn-master - LOGS"
 	 echo "============ ovnkube-master.log ======================="
-	 cat /var/log/openvswitch/ovnkube-master.log
+	 cat /var/log/ovn-kubernetes/ovnkube-master.log
 	 ;;
   "debug") echo "ovn-master - DEBUG"
 	if [ -f /var/run/openvswitch/ovnkube-master.pid ] ; then
@@ -202,7 +205,7 @@ ovn-node () {
   case $1 in
   "start") echo "ovn-node - START"
 	 /usr/bin/ovnkube \
-        --cluster-subnet "${ovn_cidr}" \
+        --cluster-subnets "${ovn_cidr}" \
         --init-node "${ovn_host}" &
 	 ;;
   "stop") echo "ovn-node - STOP"
@@ -252,12 +255,12 @@ all () {
 echo ================== ovn-debug.sh ================
 
 echo $0: daemon: ${daemon}  command: ${cmd}
-case $1 in
-"ovn-northd") echo "$1 - $2" ; ovn-northd $2 ;;
-"ovn-master") echo "$1 - $2" ; ovn-master $2 ;;
-"ovn-controller") echo "$1 - $2" ; ovn-controller $2 ;;
-"ovn-node") echo "$1 - $2" ; ovn-node $2 ;;
-"all") echo "$1 - $2" ; all $2 ;;
+case ${daemon} in
+"ovn-northd") echo "${daemon} - ${cmd}" ; ovn-northd ${cmd} ;;
+"ovn-master") echo "${daemon} - ${cmd}" ; ovn-master ${cmd} ;;
+"ovn-controller") echo "${daemon} - ${cmd}" ; ovn-controller ${cmd} ;;
+"ovn-node") echo "${daemon} - ${cmd}" ; ovn-node ${cmd} ;;
+"all") echo "${daemon} - ${cmd}" ; all ${cmd} ;;
 *) echo "[all|ovn-northd|ovn-master|ovn-controller|ovn-node] [start|stop|reload|check|logs|debug]" ;;
 esac
 

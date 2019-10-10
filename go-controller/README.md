@@ -30,23 +30,21 @@ Then find the executables here : go-controller/_output/go/windows/
 ### Usage
 
 Run the 'ovnkube' executable to initialize master, node(s) and as the central all-in-one controller that builds the network as pods/services/ingress objects are born in kubernetes.
-Options specified on the command-line override both defaults and configuration file options.
+Options specified on the command-line override configuration file options which override environment variables. Environment variables override service account files.
 
 ```
 Usage:
   -config-file string
      configuration file path (default: /etc/openvswitch/ovn_k8s.conf)
-  -cluster-subnet string
+  -cluster-subnets string
      cluster wide IP subnet to use (default: 11.11.0.0/16)
   -init-master string
-     initialize master, requires the hostname as argument
+     initialize master (that watches pods/nodes/services/policies), requires the hostname as argument
   -init-node string
      initialize node, requires the name that node is registered with in kubernetes cluster
   -remove-node string
      remove a node from the OVN cluster. Requires the name that node is
      registered with in kubernetes cluster
-  -net-controller
-     flag to start the central controller that watches pods/services/policies
   -mtu int
      MTU value used for the overlay networks (default: 1400)
   -conntrack-zone int
@@ -60,7 +58,7 @@ Usage:
   -cni-plugin string
      the name of the CNI plugin (default: ovn-k8s-cni-overlay)
   -k8s-kubeconfig string
-     absolute path to the Kubernetes kubeconfig file (not required if the --k8s-apiserver, --k8s-ca-cert, and --k8s-token are given)
+     absolute path to the Kubernetes kubeconfig file (not required if the --k8s-apiserver, --k8s-cacert, and --k8s-token are given)
   -k8s-apiserver string
      URL of the Kubernetes API server (not required if --k8s-kubeconfig is given) (default: http://localhost:8443)
   -k8s-cacert string
@@ -69,12 +67,6 @@ Usage:
      the Kubernetes API authentication token (not required if --k8s-kubeconfig is given)
   -nb-address string
      IP address and port of the OVN northbound API (eg, ssl://1.2.3.4:6641).  Leave empty to use a local unix socket.
-  -nb-server-privkey string
-     Private key that the OVN northbound API should use for securing the API.  Leave empty to use local unix socket. (default: /etc/openvswitch/ovnnb-privkey.pem)
-  -nb-server-cert string
-     Server certificate that the OVN northbound API should use for securing the API.  Leave empty to use local unix socket. (default: /etc/openvswitch/ovnnb-cert.pem)
-  -nb-server-cacert string
-     CA certificate that the OVN northbound API should use for securing the API.  Leave empty to use local unix socket. (default: /etc/openvswitch/ovnnb-ca.cert)
   -nb-client-privkey string
      Private key that the client should use for talking to the OVN database.  Leave empty to use local unix socket. (default: /etc/openvswitch/ovnnb-privkey.pem)
   -nb-client-cert string
@@ -83,20 +75,36 @@ Usage:
      CA certificate that the client should use for talking to the OVN database.  Leave empty to use local unix socket. (default: /etc/openvswitch/ovnnb-ca.cert)
   -sb-address string
      IP address and port of the OVN southbound API (eg, ssl://1.2.3.4:6642).  Leave empty to use a local unix socket.
-  -sb-server-privkey string
-     Private key that the OVN southbound API should use for securing the API.  Leave empty to use local unix socket. (default: /etc/openvswitch/ovnsb-privkey.pem)
-  -sb-server-cert string
-     Server certificate that the OVN southbound API should use for securing the API.  Leave empty to use local unix socket. (default: /etc/openvswitch/ovnsb-cert.pem)
-  -sb-server-cacert string
-     CA certificate that the OVN southbound API should use for securing the API.  Leave empty to use local unix socket. (default: /etc/openvswitch/ovnsb-ca.cert)
   -sb-client-privkey string
      Private key that the client should use for talking to the OVN database.  Leave empty to use local unix socket. (default: /etc/openvswitch/ovnsb-privkey.pem)
   -sb-client-cert string
      Client certificate that the client should use for talking to the OVN database.  Leave empty to use local unix socket. (default: /etc/openvswitch/ovnsb-cert.pem)
   -sb-client-cacert string
      CA certificate that the client should use for talking to the OVN database.  Leave empty to use local unix socket. (default: /etc/openvswitch/ovnsb-ca.cert)
-  -ha
-     rebuilds ovn db if it is started on a new node (experimental feature)
+```
+
+### Environment Variables
+Values for some configuration options can be passed in environment variables. 
+
+```
+  -KUBECONFIG
+     absolute path to the Kubernetes kubeconfig file overridden by --k8s-kubeconfig
+  -K8S_APISERVER
+     URL of the Kubernetes API server overriden by --k8s-apiserver
+  -K8S_CACERT
+     the absolute path to the Kubernetes API CA certificate overriden by --k8s-cacert
+  -K8S_TOKEN
+     the Kubernetes API authentication token overriden by --k8s-token
+```
+
+### Service Account Files
+The cluster makes the serviceaccount ca.crt and token available in files that are mounted in each container.
+
+```
+  -/var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+     contains the Kubernetes API CA certificate overriden by --k8s-cacert and K8S_CACERT.
+  -/var/run/secrets/kubernetes.io/serviceaccount/token
+     contains the Kubernetes API token overriden by --k8s-token and K8S_TOKEN
 ```
 
 ### Configuration File
@@ -147,11 +155,8 @@ ovnkube --init-master <master-host-name> \
 	--k8s-cacert <path to the cacert file> \
 	--k8s-token <token string for authentication with kube apiserver> \
 	--k8s-apiserver <url to the kube apiserver e.g. https://10.11.12.13.8443> \
-	--cluster-subnet <cidr representing the global pod network e.g. 192.168.0.0/16> \
-	--net-controller
+	--cluster-subnets <cidr representing the global pod network e.g. 192.168.0.0/16>
 ```
-
-Note that to rebuild ovn database on a new master node in case of failover, you can provide -ha option when you start ovnkube on both master and all nodes.
 
 With the above the master ovnkube controller will initialize the central master logical router and establish the watcher loops for the following:
  - nodes: as new nodes are born and init-node is called, the logical switches will be created automatically by giving out IPAM for the respective nodes

@@ -7,7 +7,36 @@ import (
 	fakeexec "k8s.io/utils/exec/testing"
 
 	"github.com/onsi/gomega"
+	"github.com/onsi/gomega/format"
 )
+
+func init() {
+	// Gomega's default string diff behavior makes it impossible to figure
+	// out what fake command is failing, so turn it off
+	format.TruncatedDiff = false
+}
+
+// FakeExec is a convenience struct that wraps testing.FakeExec
+type FakeExec struct {
+	fakeexec.FakeExec
+}
+
+// NewFakeExec returns a new FakeExec with a default LookPathFunc
+func NewFakeExec() *FakeExec {
+	return &FakeExec{
+		fakeexec.FakeExec{
+			LookPathFunc: func(file string) (string, error) {
+				return "/fake-bin/" + file, nil
+			},
+		},
+	}
+}
+
+// CalledMatchesExpected returns true if the number of commands the code under
+// test called matches the number of expected commands in the FakeExec's list
+func (f *FakeExec) CalledMatchesExpected() bool {
+	return f.CommandCalls == len(f.CommandScript)
+}
 
 // ExpectedCmd contains properties that the testcase expects a called command
 // to have as well as the output that the fake command should return
@@ -20,15 +49,22 @@ type ExpectedCmd struct {
 	Stderr string
 	// Err is any error that should be returned for the invocation of Cmd
 	Err error
+	// Action is run when the fake command is "run"
+	Action func() error
 }
 
 // AddFakeCmd takes the ExpectedCmd and appends its runner function to
-// a fake command action list
-func AddFakeCmd(fakeCmds []fakeexec.FakeCommandAction, expected *ExpectedCmd) []fakeexec.FakeCommandAction {
-	return append(fakeCmds, func(cmd string, args ...string) kexec.Cmd {
+// a fake command action list of the FakeExec
+func (f *FakeExec) AddFakeCmd(expected *ExpectedCmd) {
+	f.CommandScript = append(f.CommandScript, func(cmd string, args ...string) kexec.Cmd {
 		parts := strings.Split(expected.Cmd, " ")
-		gomega.Expect(cmd).To(gomega.Equal("/fake-bin/" + parts[0]))
-		gomega.Expect(strings.Join(args, " ")).To(gomega.Equal(strings.Join(parts[1:], " ")))
+		gomega.Expect(len(parts)).To(gomega.BeNumerically(">=", 2))
+
+		executedCommandline := cmd + " " + strings.Join(args, " ")
+		expectedCommandline := "/fake-bin/" + strings.Join(parts, " ")
+		// Expect the incoming 'args' to equal the fake/expected command 'parts'
+		gomega.Expect(executedCommandline).To(gomega.Equal(expectedCommandline), "Called command doesn't match expected fake command")
+
 		return &fakeexec.FakeCmd{
 			Argv: parts[1:],
 			CombinedOutputScript: []fakeexec.FakeCombinedOutputAction{
@@ -38,6 +74,10 @@ func AddFakeCmd(fakeCmds []fakeexec.FakeCommandAction, expected *ExpectedCmd) []
 			},
 			RunScript: []fakeexec.FakeRunAction{
 				func() ([]byte, []byte, error) {
+					if expected.Action != nil {
+						err := expected.Action()
+						gomega.Expect(err).NotTo(gomega.HaveOccurred())
+					}
 					return []byte(expected.Output), []byte(expected.Stderr), expected.Err
 				},
 			},
@@ -45,11 +85,10 @@ func AddFakeCmd(fakeCmds []fakeexec.FakeCommandAction, expected *ExpectedCmd) []
 	})
 }
 
-// AddFakeCmdsNoOutputNoError takes a list of commands and appends those commands
-// to the expected command set. The command cannot return any output or error.
-func AddFakeCmdsNoOutputNoError(fakeCmds []fakeexec.FakeCommandAction, commands []string) []fakeexec.FakeCommandAction {
+// AddFakeCmdsNoOutputNoError appends a list of commands to the expected
+// command set. The command cannot return any output or error.
+func (f *FakeExec) AddFakeCmdsNoOutputNoError(commands []string) {
 	for _, cmd := range commands {
-		fakeCmds = AddFakeCmd(fakeCmds, &ExpectedCmd{Cmd: cmd})
+		f.AddFakeCmd(&ExpectedCmd{Cmd: cmd})
 	}
-	return fakeCmds
 }
