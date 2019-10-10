@@ -3,13 +3,13 @@ package ovn
 import (
 	"strings"
 
-	util "github.com/openvswitch/ovn-kubernetes/go-controller/pkg/util"
+	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/sirupsen/logrus"
 )
 
 func (ovn *Controller) getOvnGateways() ([]string, string, error) {
 	// Return all created gateways.
-	out, stderr, err := util.RunOVNNbctlHA("--data=bare", "--no-heading",
+	out, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading",
 		"--columns=name", "find",
 		"logical_router",
 		"options:chassis!=null")
@@ -18,7 +18,7 @@ func (ovn *Controller) getOvnGateways() ([]string, string, error) {
 
 func (ovn *Controller) getGatewayPhysicalIP(
 	physicalGateway string) (string, error) {
-	physicalIP, _, err := util.RunOVNNbctlHA("get", "logical_router",
+	physicalIP, _, err := util.RunOVNNbctl("get", "logical_router",
 		physicalGateway, "external_ids:physical_ip")
 	if err != nil {
 		return "", err
@@ -30,7 +30,7 @@ func (ovn *Controller) getGatewayPhysicalIP(
 func (ovn *Controller) getGatewayLoadBalancer(physicalGateway,
 	protocol string) (string, error) {
 	externalIDKey := protocol + "_lb_gateway_router"
-	loadBalancer, _, err := util.RunOVNNbctlHA("--data=bare", "--no-heading",
+	loadBalancer, _, err := util.RunOVNNbctl("--data=bare", "--no-heading",
 		"--columns=_uuid", "find", "load_balancer",
 		"external_ids:"+externalIDKey+"="+
 			physicalGateway)
@@ -42,7 +42,7 @@ func (ovn *Controller) getGatewayLoadBalancer(physicalGateway,
 
 func (ovn *Controller) createGatewaysVIP(protocol string, port, targetPort int32, ips []string) error {
 
-	logrus.Debugf("Creating Gateway VIP - %s, %s, %d, %v", protocol, port, targetPort, ips)
+	logrus.Debugf("Creating Gateway VIP - %s, %d, %d, %v", protocol, port, targetPort, ips)
 
 	// Each gateway has a separate load-balancer for N/S traffic
 

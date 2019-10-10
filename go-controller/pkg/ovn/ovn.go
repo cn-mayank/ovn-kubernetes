@@ -1,9 +1,10 @@
 package ovn
 
 import (
-	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/factory"
-	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/kube"
-	util "github.com/openvswitch/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/sirupsen/logrus"
 	kapi "k8s.io/api/core/v1"
 	kapisnetworking "k8s.io/api/networking/v1"
@@ -16,9 +17,8 @@ import (
 // Controller structure is the object which holds the controls for starting
 // and reacting upon the watched resources (e.g. pods, endpoints)
 type Controller struct {
-	kube           kube.Interface
-	nodePortEnable bool
-	watchFactory   *factory.WatchFactory
+	kube         kube.Interface
+	watchFactory *factory.WatchFactory
 
 	gatewayCache map[string]string
 	// For TCP and UDP type traffic, cache OVN load-balancers used for the
@@ -28,6 +28,7 @@ type Controller struct {
 	// For TCP and UDP type traffice, cache OVN load balancer that exists on the
 	// default gateway
 	loadbalancerGWCache map[string]string
+	defGatewayRouter    string
 
 	// A cache of all logical switches seen by the watcher
 	logicalSwitchCache map[string]bool
@@ -66,6 +67,10 @@ type Controller struct {
 	// A mutex for lspIngressDenyCache and lspEgressDenyCache
 	lspMutex *sync.Mutex
 
+	// A mutex for gatewayCache and logicalSwitchCache which holds
+	// logicalSwitch information
+	lsMutex *sync.Mutex
+
 	// supports port_group?
 	portGroupSupport bool
 }
@@ -80,7 +85,7 @@ const (
 
 // NewOvnController creates a new OVN controller for creating logical network
 // infrastructure and policy
-func NewOvnController(kubeClient kubernetes.Interface, wf *factory.WatchFactory, nodePortEnable bool) *Controller {
+func NewOvnController(kubeClient kubernetes.Interface, wf *factory.WatchFactory) *Controller {
 	return &Controller{
 		kube:                     &kube.Kube{KClient: kubeClient},
 		watchFactory:             wf,
@@ -93,22 +98,23 @@ func NewOvnController(kubeClient kubernetes.Interface, wf *factory.WatchFactory,
 		lspIngressDenyCache:      make(map[string]int),
 		lspEgressDenyCache:       make(map[string]int),
 		lspMutex:                 &sync.Mutex{},
+		lsMutex:                  &sync.Mutex{},
 		gatewayCache:             make(map[string]string),
 		loadbalancerClusterCache: make(map[string]string),
 		loadbalancerGWCache:      make(map[string]string),
-		nodePortEnable:           nodePortEnable,
 	}
 }
 
 // Run starts the actual watching. Also initializes any local structures needed.
 func (oc *Controller) Run() error {
-	_, _, err := util.RunOVNNbctlHA("--columns=_uuid", "list",
+	_, _, err := util.RunOVNNbctl("--columns=_uuid", "list",
 		"port_group")
 	if err == nil {
 		oc.portGroupSupport = true
 	}
 
-	for _, f := range []func() error{oc.WatchPods, oc.WatchServices, oc.WatchEndpoints, oc.WatchNamespaces, oc.WatchNetworkPolicy} {
+	for _, f := range []func() error{oc.WatchPods, oc.WatchServices, oc.WatchEndpoints, oc.WatchNamespaces,
+		oc.WatchNetworkPolicy, oc.WatchNodes} {
 		if err := f(); err != nil {
 			return err
 		}
@@ -239,5 +245,47 @@ func (oc *Controller) WatchNamespaces() error {
 			return
 		},
 	}, oc.syncNamespaces)
+	return err
+}
+
+// WatchNodes starts the watching of node resource and calls
+// back the appropriate handler logic
+func (oc *Controller) WatchNodes() error {
+	gatewaysHandled := make(map[string]bool)
+	_, err := oc.watchFactory.AddNodeHandler(cache.ResourceEventHandlerFuncs{
+		AddFunc: func(obj interface{}) {
+			if !config.Gateway.NodeportEnable {
+				return
+			}
+			node := obj.(*kapi.Node)
+			gatewaysHandled[node.Name] = oc.handleNodePortLB(node)
+		},
+		UpdateFunc: func(old, new interface{}) {
+			if !config.Gateway.NodeportEnable {
+				return
+			}
+			node := new.(*kapi.Node)
+			if !gatewaysHandled[node.Name] {
+				gatewaysHandled[node.Name] = oc.handleNodePortLB(node)
+			}
+		},
+		DeleteFunc: func(obj interface{}) {
+			node := obj.(*kapi.Node)
+			logrus.Debugf("Delete event for Node %q. Removing the node from "+
+				"various caches", node.Name)
+
+			oc.lsMutex.Lock()
+			delete(oc.gatewayCache, node.Name)
+			delete(oc.logicalSwitchCache, node.Name)
+			oc.lsMutex.Unlock()
+			delete(gatewaysHandled, node.Name)
+			if oc.defGatewayRouter == "GR_"+node.Name {
+				delete(oc.loadbalancerGWCache, TCP)
+				delete(oc.loadbalancerGWCache, UDP)
+				oc.defGatewayRouter = ""
+				oc.handleExternalIPsLB()
+			}
+		},
+	}, nil)
 	return err
 }

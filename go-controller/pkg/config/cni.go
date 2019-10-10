@@ -8,10 +8,12 @@ import (
 	"path/filepath"
 
 	"github.com/containernetworking/cni/pkg/types"
+
+	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
 )
 
 // WriteCNIConfig writes a CNI JSON config file to directory given by global config
-func WriteCNIConfig() error {
+func WriteCNIConfig(ConfDir string, fileName string) error {
 	bytes, err := json.Marshal(&types.NetConf{
 		CNIVersion: "0.3.1",
 		Name:       "ovn-kubernetes",
@@ -23,16 +25,16 @@ func WriteCNIConfig() error {
 
 	// Install the CNI config file after all initialization is done
 	// MkdirAll() returns no error if the path already exists
-	err = os.MkdirAll(CNI.ConfDir, os.ModeDir)
+	err = os.MkdirAll(ConfDir, os.ModeDir)
 	if err != nil {
 		return err
 	}
 
 	// Always create the CNI config for consistency.
-	confFile := filepath.Join(CNI.ConfDir, "10-ovn-kubernetes.conf")
+	confFile := filepath.Join(ConfDir, fileName)
 
 	var f *os.File
-	f, err = ioutil.TempFile(CNI.ConfDir, "ovnkube-")
+	f, err = ioutil.TempFile(ConfDir, "ovnkube-")
 	if err != nil {
 		return err
 	}
@@ -50,8 +52,8 @@ func WriteCNIConfig() error {
 }
 
 // ReadCNIConfig unmarshals a CNI JSON config into an NetConf structure
-func ReadCNIConfig(bytes []byte) (*types.NetConf, error) {
-	conf := &types.NetConf{}
+func ReadCNIConfig(bytes []byte) (*ovntypes.NetConf, error) {
+	conf := &ovntypes.NetConf{}
 	if err := json.Unmarshal(bytes, conf); err != nil {
 		return nil, err
 	}

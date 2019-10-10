@@ -2,7 +2,8 @@ package ovn
 
 import (
 	"fmt"
-	util "github.com/openvswitch/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/sirupsen/logrus"
 	kapi "k8s.io/api/core/v1"
 	knet "k8s.io/api/networking/v1"
@@ -54,7 +55,7 @@ func (oc *Controller) addACLAllow(np *namespacePolicy,
 		action = "allow"
 	}
 
-	uuid, stderr, err := util.RunOVNNbctlHA("--data=bare", "--no-heading",
+	uuid, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading",
 		"--columns=_uuid", "find", "ACL",
 		fmt.Sprintf("external-ids:l4Match=\"%s\"", l4Match),
 		fmt.Sprintf("external-ids:ipblock_cidr=%t", ipBlockCidr),
@@ -73,7 +74,7 @@ func (oc *Controller) addACLAllow(np *namespacePolicy,
 		return
 	}
 
-	_, stderr, err = util.RunOVNNbctlHA("--id=@acl", "create",
+	_, stderr, err = util.RunOVNNbctl("--id=@acl", "create",
 		"acl", fmt.Sprintf("priority=%s", defaultAllowPriority),
 		fmt.Sprintf("direction=%s", direction), match,
 		fmt.Sprintf("action=%s", action),
@@ -95,7 +96,7 @@ func (oc *Controller) addACLAllow(np *namespacePolicy,
 func (oc *Controller) modifyACLAllow(namespace, policy,
 	oldMatch string, newMatch string, gressNum int,
 	policyType knet.PolicyType) {
-	uuid, stderr, err := util.RunOVNNbctlHA("--data=bare", "--no-heading",
+	uuid, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading",
 		"--columns=_uuid", "find", "ACL", oldMatch,
 		fmt.Sprintf("external-ids:namespace=%s", namespace),
 		fmt.Sprintf("external-ids:policy=%s", policy),
@@ -110,7 +111,7 @@ func (oc *Controller) modifyACLAllow(namespace, policy,
 
 	if uuid != "" {
 		// We already have an ACL. We will update it.
-		_, stderr, err = util.RunOVNNbctlHA("set", "acl", uuid,
+		_, stderr, err = util.RunOVNNbctl("set", "acl", uuid,
 			fmt.Sprintf("%s", newMatch))
 		if err != nil {
 			logrus.Errorf("failed to modify the allow-from rule for "+
@@ -135,7 +136,7 @@ func (oc *Controller) addIPBlockACLDeny(np *namespacePolicy,
 		match = fmt.Sprintf("match=\"%s && %s\"", lportMatch, l3Match)
 	}
 
-	uuid, stderr, err := util.RunOVNNbctlHA("--data=bare", "--no-heading",
+	uuid, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading",
 		"--columns=_uuid", "find", "ACL", match, "action=drop",
 		fmt.Sprintf("external-ids:ipblock-deny-policy-type=%s", policyType),
 		fmt.Sprintf("external-ids:namespace=%s", np.namespace),
@@ -152,7 +153,7 @@ func (oc *Controller) addIPBlockACLDeny(np *namespacePolicy,
 		return
 	}
 
-	_, stderr, err = util.RunOVNNbctlHA("--id=@acl", "create", "acl",
+	_, stderr, err = util.RunOVNNbctl("--id=@acl", "create", "acl",
 		fmt.Sprintf("priority=%s", priority),
 		fmt.Sprintf("direction=%s", direction), match, "action=drop",
 		fmt.Sprintf("external-ids:ipblock-deny-policy-type=%s", policyType),
@@ -178,7 +179,7 @@ func (oc *Controller) addACLDenyPortGroup(portGroupUUID, portGroupName,
 		match = fmt.Sprintf("match=\"inport == @%s\"", portGroupName)
 	}
 
-	uuid, stderr, err := util.RunOVNNbctlHA("--data=bare", "--no-heading",
+	uuid, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading",
 		"--columns=_uuid", "find", "ACL", match, "action=drop",
 		fmt.Sprintf("external-ids:default-deny-policy-type=%s", policyType))
 	if err != nil {
@@ -190,7 +191,7 @@ func (oc *Controller) addACLDenyPortGroup(portGroupUUID, portGroupName,
 		return nil
 	}
 
-	_, stderr, err = util.RunOVNNbctlHA("--id=@acl", "create", "acl",
+	_, stderr, err = util.RunOVNNbctl("--id=@acl", "create", "acl",
 		fmt.Sprintf("priority=%s", priority),
 		fmt.Sprintf("direction=%s", direction), match, "action=drop",
 		fmt.Sprintf("external-ids:default-deny-policy-type=%s", policyType),
@@ -209,7 +210,7 @@ func (oc *Controller) addToACLDeny(portGroup, logicalPort string) {
 		return
 	}
 
-	_, stderr, err := util.RunOVNNbctlHA("--if-exists", "remove",
+	_, stderr, err := util.RunOVNNbctl("--if-exists", "remove",
 		"port_group", portGroup, "ports", logicalPortUUID, "--",
 		"add", "port_group", portGroup, "ports", logicalPortUUID)
 	if err != nil {
@@ -224,7 +225,7 @@ func (oc *Controller) deleteFromACLDeny(portGroup, logicalPort string) {
 		return
 	}
 
-	_, stderr, err := util.RunOVNNbctlHA("--if-exists", "remove",
+	_, stderr, err := util.RunOVNNbctl("--if-exists", "remove",
 		"port_group", portGroup, "ports", logicalPortUUID)
 	if err != nil {
 		logrus.Errorf("Failed to delete logicalPort %s to portGroup %s "+
@@ -418,7 +419,7 @@ func (oc *Controller) handleLocalPodSelectorAddFunc(
 		return
 	}
 
-	_, stderr, err := util.RunOVNNbctlHA("--if-exists", "remove",
+	_, stderr, err := util.RunOVNNbctl("--if-exists", "remove",
 		"port_group", np.portGroupUUID, "ports", logicalPortUUID, "--",
 		"add", "port_group", np.portGroupUUID, "ports", logicalPortUUID)
 	if err != nil {
@@ -460,7 +461,7 @@ func (oc *Controller) handleLocalPodSelectorDelFunc(
 		return
 	}
 
-	_, stderr, err := util.RunOVNNbctlHA("--if-exists", "remove",
+	_, stderr, err := util.RunOVNNbctl("--if-exists", "remove",
 		"port_group", np.portGroupUUID, "ports", logicalPortUUID)
 	if err != nil {
 		logrus.Errorf("Failed to delete logicalPort %s from portGroup %s "+
@@ -471,7 +472,7 @@ func (oc *Controller) handleLocalPodSelectorDelFunc(
 func (oc *Controller) handleLocalPodSelector(
 	policy *knet.NetworkPolicy, np *namespacePolicy) {
 
-	id, err := oc.watchFactory.AddFilteredPodHandler(policy.Namespace,
+	h, err := oc.watchFactory.AddFilteredPodHandler(policy.Namespace,
 		&policy.Spec.PodSelector,
 		cache.ResourceEventHandlerFuncs{
 			AddFunc: func(obj interface{}) {
@@ -490,82 +491,144 @@ func (oc *Controller) handleLocalPodSelector(
 		return
 	}
 
-	np.podHandlerIDList = append(np.podHandlerIDList, id)
+	np.podHandlerList = append(np.podHandlerList, h)
+}
 
+func (oc *Controller) handlePeerNamespaceAndPodSelector(
+	policy *knet.NetworkPolicy,
+	namespaceSelector *metav1.LabelSelector,
+	podSelector *metav1.LabelSelector,
+	addressSet string,
+	addressMap map[string]bool,
+	gress *gressPolicy,
+	np *namespacePolicy) {
+
+	namespaceHandler, err := oc.watchFactory.AddFilteredNamespaceHandler("",
+		namespaceSelector,
+		cache.ResourceEventHandlerFuncs{
+			AddFunc: func(obj interface{}) {
+				namespace := obj.(*kapi.Namespace)
+				np.Lock()
+				alreadyDeleted := np.deleted
+				np.Unlock()
+				if alreadyDeleted {
+					return
+				}
+
+				// The AddFilteredPodHandler call might call handlePeerPodSelectorAddUpdate
+				// on existing pods so we can't be holding the lock at this point
+				podHandler, err := oc.watchFactory.AddFilteredPodHandler(namespace.Name,
+					podSelector,
+					cache.ResourceEventHandlerFuncs{
+						AddFunc: func(obj interface{}) {
+							oc.handlePeerPodSelectorAddUpdate(policy, np, addressMap, addressSet, obj)
+						},
+						DeleteFunc: func(obj interface{}) {
+							oc.handlePeerPodSelectorDelete(policy, np, addressMap, addressSet, obj)
+						},
+						UpdateFunc: func(oldObj, newObj interface{}) {
+							oc.handlePeerPodSelectorAddUpdate(policy, np, addressMap, addressSet, newObj)
+						},
+					}, nil)
+				if err != nil {
+					logrus.Errorf("error watching pods in namespace %s for policy %s: %v", namespace.Name, policy.Name, err)
+					return
+				}
+				np.Lock()
+				defer np.Unlock()
+				if np.deleted {
+					_ = oc.watchFactory.RemovePodHandler(podHandler)
+					return
+				}
+				np.podHandlerList = append(np.podHandlerList, podHandler)
+			},
+			DeleteFunc: func(obj interface{}) {
+				return
+			},
+			UpdateFunc: func(oldObj, newObj interface{}) {
+				return
+			},
+		}, nil)
+	if err != nil {
+		logrus.Errorf("error watching namespaces for policy %s: %v",
+			policy.Name, err)
+		return
+	}
+	np.nsHandlerList = append(np.nsHandlerList, namespaceHandler)
+}
+
+func (oc *Controller) handlePeerPodSelectorAddUpdate(
+	policy *knet.NetworkPolicy, np *namespacePolicy,
+	addressMap map[string]bool, addressSet string,
+	obj interface{}) {
+
+	pod := obj.(*kapi.Pod)
+	ipAddress := oc.getIPFromOvnAnnotation(pod.Annotations["ovn"])
+	if ipAddress == "" || addressMap[ipAddress] {
+		return
+	}
+
+	np.Lock()
+	defer np.Unlock()
+	if np.deleted {
+		return
+	}
+
+	addressMap[ipAddress] = true
+	addresses := make([]string, 0, len(addressMap))
+	for k := range addressMap {
+		addresses = append(addresses, k)
+	}
+	oc.setAddressSet(addressSet, addresses)
+
+}
+
+func (oc *Controller) handlePeerPodSelectorDelete(
+	policy *knet.NetworkPolicy, np *namespacePolicy,
+	addressMap map[string]bool, addressSet string,
+	obj interface{}) {
+
+	pod := obj.(*kapi.Pod)
+
+	ipAddress := oc.getIPFromOvnAnnotation(pod.Annotations["ovn"])
+	if ipAddress == "" {
+		return
+	}
+
+	np.Lock()
+	defer np.Unlock()
+	if np.deleted {
+		return
+	}
+
+	if !addressMap[ipAddress] {
+		return
+	}
+
+	delete(addressMap, ipAddress)
+
+	addresses := make([]string, 0, len(addressMap))
+	for k := range addressMap {
+		addresses = append(addresses, k)
+	}
+	oc.setAddressSet(addressSet, addresses)
 }
 
 func (oc *Controller) handlePeerPodSelector(
 	policy *knet.NetworkPolicy, podSelector *metav1.LabelSelector,
 	addressSet string, addressMap map[string]bool, np *namespacePolicy) {
 
-	id, err := oc.watchFactory.AddFilteredPodHandler(policy.Namespace,
+	h, err := oc.watchFactory.AddFilteredPodHandler(policy.Namespace,
 		podSelector,
 		cache.ResourceEventHandlerFuncs{
 			AddFunc: func(obj interface{}) {
-				pod := obj.(*kapi.Pod)
-				ipAddress := oc.getIPFromOvnAnnotation(pod.Annotations["ovn"])
-				if ipAddress == "" || addressMap[ipAddress] {
-					return
-				}
-
-				np.Lock()
-				defer np.Unlock()
-				if np.deleted {
-					return
-				}
-
-				addressMap[ipAddress] = true
-				addresses := make([]string, 0, len(addressMap))
-				for k := range addressMap {
-					addresses = append(addresses, k)
-				}
-				oc.setAddressSet(addressSet, addresses)
+				oc.handlePeerPodSelectorAddUpdate(policy, np, addressMap, addressSet, obj)
 			},
 			DeleteFunc: func(obj interface{}) {
-				pod := obj.(*kapi.Pod)
-
-				ipAddress := oc.getIPFromOvnAnnotation(pod.Annotations["ovn"])
-				if ipAddress == "" {
-					return
-				}
-
-				np.Lock()
-				defer np.Unlock()
-				if np.deleted {
-					return
-				}
-
-				if !addressMap[ipAddress] {
-					return
-				}
-
-				delete(addressMap, ipAddress)
-
-				addresses := make([]string, 0, len(addressMap))
-				for k := range addressMap {
-					addresses = append(addresses, k)
-				}
-				oc.setAddressSet(addressSet, addresses)
+				oc.handlePeerPodSelectorDelete(policy, np, addressMap, addressSet, obj)
 			},
 			UpdateFunc: func(oldObj, newObj interface{}) {
-				pod := newObj.(*kapi.Pod)
-				ipAddress := oc.getIPFromOvnAnnotation(pod.Annotations["ovn"])
-				if ipAddress == "" || addressMap[ipAddress] {
-					return
-				}
-
-				np.Lock()
-				defer np.Unlock()
-				if np.deleted {
-					return
-				}
-
-				addressMap[ipAddress] = true
-				addresses := make([]string, 0, len(addressMap))
-				for k := range addressMap {
-					addresses = append(addresses, k)
-				}
-				oc.setAddressSet(addressSet, addresses)
+				oc.handlePeerPodSelectorAddUpdate(policy, np, addressMap, addressSet, newObj)
 			},
 		}, nil)
 	if err != nil {
@@ -574,7 +637,7 @@ func (oc *Controller) handlePeerPodSelector(
 		return
 	}
 
-	np.podHandlerIDList = append(np.podHandlerIDList, id)
+	np.podHandlerList = append(np.podHandlerList, h)
 
 }
 
@@ -614,7 +677,7 @@ func (oc *Controller) handlePeerNamespaceSelector(
 	namespaceSelector *metav1.LabelSelector,
 	gress *gressPolicy, np *namespacePolicy) {
 
-	id, err := oc.watchFactory.AddFilteredNamespaceHandler("",
+	h, err := oc.watchFactory.AddFilteredNamespaceHandler("",
 		namespaceSelector,
 		cache.ResourceEventHandlerFuncs{
 			AddFunc: func(obj interface{}) {
@@ -655,7 +718,7 @@ func (oc *Controller) handlePeerNamespaceSelector(
 		return
 	}
 
-	np.nsHandlerIDList = append(np.nsHandlerIDList, id)
+	np.nsHandlerList = append(np.nsHandlerList, h)
 
 }
 
@@ -681,8 +744,8 @@ func (oc *Controller) addNetworkPolicyPortGroup(policy *knet.NetworkPolicy) {
 	np.namespace = policy.Namespace
 	np.ingressPolicies = make([]*gressPolicy, 0)
 	np.egressPolicies = make([]*gressPolicy, 0)
-	np.podHandlerIDList = make([]uint64, 0)
-	np.nsHandlerIDList = make([]uint64, 0)
+	np.podHandlerList = make([]*factory.Handler, 0)
+	np.nsHandlerList = make([]*factory.Handler, 0)
 	np.localPods = make(map[string]bool)
 
 	// Create a port group for the policy. All the pods that this policy
@@ -735,14 +798,20 @@ func (oc *Controller) addNetworkPolicyPortGroup(policy *knet.NetworkPolicy) {
 		oc.localPodAddACL(np, ingress)
 
 		for _, fromJSON := range ingressJSON.From {
-			if fromJSON.NamespaceSelector != nil {
+			if fromJSON.NamespaceSelector != nil && fromJSON.PodSelector != nil {
+				// For each rule that contains both peer namespace selector and
+				// peer pod selector, we create a watcher for each matching namespace
+				// that populates the addressSet
+				oc.handlePeerNamespaceAndPodSelector(policy,
+					fromJSON.NamespaceSelector, fromJSON.PodSelector,
+					hashedLocalAddressSet, peerPodAddressMap, ingress, np)
+
+			} else if fromJSON.NamespaceSelector != nil {
 				// For each peer namespace selector, we create a watcher that
 				// populates ingress.peerAddressSets
 				oc.handlePeerNamespaceSelector(policy,
 					fromJSON.NamespaceSelector, ingress, np)
-			}
-
-			if fromJSON.PodSelector != nil {
+			} else if fromJSON.PodSelector != nil {
 				// For each peer pod selector, we create a watcher that
 				// populates the addressSet
 				oc.handlePeerPodSelector(policy, fromJSON.PodSelector,
@@ -789,14 +858,20 @@ func (oc *Controller) addNetworkPolicyPortGroup(policy *knet.NetworkPolicy) {
 		oc.localPodAddACL(np, egress)
 
 		for _, toJSON := range egressJSON.To {
-			if toJSON.NamespaceSelector != nil {
+			if toJSON.NamespaceSelector != nil && toJSON.PodSelector != nil {
+				// For each rule that contains both peer namespace selector and
+				// peer pod selector, we create a watcher for each matching namespace
+				// that populates the addressSet
+				oc.handlePeerNamespaceAndPodSelector(policy,
+					toJSON.NamespaceSelector, toJSON.PodSelector,
+					hashedLocalAddressSet, peerPodAddressMap, egress, np)
+
+			} else if toJSON.NamespaceSelector != nil {
 				// For each peer namespace selector, we create a watcher that
 				// populates egress.peerAddressSets
 				go oc.handlePeerNamespaceSelector(policy,
 					toJSON.NamespaceSelector, egress, np)
-			}
-
-			if toJSON.PodSelector != nil {
+			} else if toJSON.PodSelector != nil {
 				// For each peer pod selector, we create a watcher that
 				// populates the addressSet
 				oc.handlePeerPodSelector(policy, toJSON.PodSelector,

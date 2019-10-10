@@ -20,34 +20,41 @@ USER root
 
 ENV PYTHONDONTWRITEBYTECODE yes
 
-RUN yum install -y  \
-	PyYAML bind-utils \
-	openssl \
-	numactl-libs \
-	firewalld-filesystem \
-	libpcap \
-	hostname \
-	iproute strace socat && \
-	yum clean all
+COPY kubernetes.repo /etc/yum.repos.d/kubernetes.repo
+RUN INSTALL_PKGS=" \
+	PyYAML bind-utils procps-ng openssl numactl-libs firewalld-filesystem \
+	libpcap kubernetes-client \
+	iptables iproute strace socat \
+	unbound-libs \
+        " && \
+	yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False $INSTALL_PKGS && \
+	yum clean all && rm -rf /var/cache/yum/*
 
-# get a reasonable version of openvswitch
-RUN rpm -i http://cbs.centos.org/kojifiles/packages/openvswitch/2.9.0/4.el7/x86_64/openvswitch-2.9.0-4.el7.x86_64.rpm
-RUN rpm -i http://cbs.centos.org/kojifiles/packages/openvswitch/2.9.0/4.el7/x86_64/openvswitch-ovn-common-2.9.0-4.el7.x86_64.rpm
-RUN rpm -i http://cbs.centos.org/kojifiles/packages/openvswitch/2.9.0/4.el7/x86_64/openvswitch-ovn-central-2.9.0-4.el7.x86_64.rpm
-RUN rpm -i http://cbs.centos.org/kojifiles/packages/openvswitch/2.9.0/4.el7/x86_64/openvswitch-ovn-host-2.9.0-4.el7.x86_64.rpm
-RUN rpm -i http://cbs.centos.org/kojifiles/packages/openvswitch/2.9.0/4.el7/x86_64/openvswitch-ovn-vtep-2.9.0-4.el7.x86_64.rpm
-RUN rpm -i http://cbs.centos.org/kojifiles/packages/openvswitch/2.9.0/4.el7/x86_64/openvswitch-devel-2.9.0-4.el7.x86_64.rpm
-RUN rpm -i http://dl.fedoraproject.org/pub/epel/7/x86_64/Packages/c/containernetworking-cni-0.5.1-1.el7.x86_64.rpm
+# Get a reasonable version of openvswitch (2.9.2 or higher)
+# docker build --build-arg rpmArch=ARCH -f Dockerfile.centos -t some_tag .
+# where ARCH can be x86_64 (default), aarch64, or ppc64le
+ARG rpmArch=x86_64
+ARG ovsVer=2.10.1
+ARG ovsSubVer=3.el7
+ARG dpdkVer=17.11
+ARG dpdkSubVer=3.el7
+ARG dpdkRpmUrl=http://cbs.centos.org/kojifiles/packages/dpdk/${dpdkVer}/${dpdkSubVer}/${rpmArch}/dpdk-${dpdkVer}-${dpdkSubVer}.${rpmArch}.rpm
+
+RUN if [ "$(uname -m)" = "aarch64" ]; then dpdkRpmUrl=https://rpmfind.net/linux/fedora/linux/updates/28/Everything/aarch64/Packages/d/dpdk-17.11.2-1.fc28.aarch64.rpm; fi && rpm -i ${dpdkRpmUrl}
+RUN rpm -i http://cbs.centos.org/kojifiles/packages/openvswitch/${ovsVer}/${ovsSubVer}/${rpmArch}/openvswitch-${ovsVer}-${ovsSubVer}.${rpmArch}.rpm
+RUN rpm -i http://cbs.centos.org/kojifiles/packages/openvswitch/${ovsVer}/${ovsSubVer}/${rpmArch}/openvswitch-ovn-common-${ovsVer}-${ovsSubVer}.${rpmArch}.rpm
+RUN rpm -i http://cbs.centos.org/kojifiles/packages/openvswitch/${ovsVer}/${ovsSubVer}/${rpmArch}/openvswitch-ovn-central-${ovsVer}-${ovsSubVer}.${rpmArch}.rpm
+RUN rpm -i http://cbs.centos.org/kojifiles/packages/openvswitch/${ovsVer}/${ovsSubVer}/${rpmArch}/openvswitch-ovn-host-${ovsVer}-${ovsSubVer}.${rpmArch}.rpm
+RUN rpm -i http://cbs.centos.org/kojifiles/packages/openvswitch/${ovsVer}/${ovsSubVer}/${rpmArch}/openvswitch-ovn-vtep-${ovsVer}-${ovsSubVer}.${rpmArch}.rpm
+RUN rpm -i http://cbs.centos.org/kojifiles/packages/openvswitch/${ovsVer}/${ovsSubVer}/${rpmArch}/openvswitch-devel-${ovsVer}-${ovsSubVer}.${rpmArch}.rpm
 RUN rm -rf /var/cache/yum
 
 RUN mkdir -p /var/run/openvswitch
-RUN mkdir -p /etc/cni/net.d
-RUN mkdir -p /opt/cni/bin
 
 # Built in ../../go_controller, then the binaries are copied here.
 # put things where they are in the rpm
 RUN mkdir -p /usr/libexec/cni/
-COPY ovn-k8s-overlay ovnkube ovn-kube-util /usr/bin/
+COPY ovnkube ovn-kube-util /usr/bin/
 COPY ovn-k8s-cni-overlay /usr/libexec/cni/ovn-k8s-cni-overlay
 
 # ovnkube.sh is the entry point. This script examines environment
@@ -58,9 +65,7 @@ COPY ovn-debug.sh /root/
 COPY ovn_k8s.conf /etc/openvswitch/ovn_k8s.conf
 
 # copy git commit number into image
-RUN mkdir -p /root/.git/ /root/.git/refs/heads/
-COPY .git/HEAD /root/.git/HEAD
-COPY .git/refs/heads/ /root/.git/refs/heads/
+COPY git_info /root
 
 
 LABEL io.k8s.display-name="ovn kubernetes" \

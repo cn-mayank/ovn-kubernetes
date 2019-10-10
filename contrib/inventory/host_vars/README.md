@@ -18,3 +18,16 @@ one present in group_vars. Example for "node5":
 ansible_user: Administrator
 ansible_password: different_password
 ```
+
+If you want a preferred network interface for the SDN setup, use the
+following configuration option:
+```
+sdn_preferred_nic_name: "Ethernet 2"
+```
+
+By default, all the Kubernetes minions will be configured as gateway nodes.
+If you don't want a particular node to be a gateway, use the following
+configuration option:
+```
+init_gateway: false
+```

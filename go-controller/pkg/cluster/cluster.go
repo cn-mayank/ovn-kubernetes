@@ -5,40 +5,28 @@ import (
 	"net"
 
 	"github.com/openshift/origin/pkg/util/netutils"
-	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/config"
-	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/factory"
-	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/kube"
-	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"k8s.io/client-go/kubernetes"
 )
 
 // OvnClusterController is the object holder for utilities meant for cluster management
 type OvnClusterController struct {
-	Kube                  kube.Interface
-	watchFactory          *factory.WatchFactory
-	masterSubnetAllocator *netutils.SubnetAllocator
+	Kube                      kube.Interface
+	watchFactory              *factory.WatchFactory
+	masterSubnetAllocatorList []*netutils.SubnetAllocator
 
-	ClusterIPNet          *net.IPNet
-	ClusterServicesSubnet string
-	HostSubnetLength      uint32
-
-	GatewayInit      bool
-	GatewayIntf      string
-	GatewayBridge    string
-	GatewayNextHop   string
-	GatewaySpareIntf bool
-	NodePortEnable   bool
-	OvnHA            bool
-	LocalnetGateway  bool
+	TCPLoadBalancerUUID string
+	UDPLoadBalancerUUID string
 }
 
 const (
 	// OvnHostSubnet is the constant string representing the annotation key
 	OvnHostSubnet = "ovn_host_subnet"
-	// DefaultNamespace is the name of the default namespace
-	DefaultNamespace = "default"
-	// MasterOverlayIP is the overlay IP address on master node
-	MasterOverlayIP = "master_overlay_ip"
+	// OvnClusterRouter is the name of the distributed router
+	OvnClusterRouter = "ovn_cluster_router"
 )
 
 // NewClusterController creates a new controller for IP subnet allocation to
@@ -50,7 +38,14 @@ func NewClusterController(kubeClient kubernetes.Interface, wf *factory.WatchFact
 	}
 }
 
-func setOVSExternalIDs(nodeName string, ids ...string) error {
+func setupOVNNode(nodeName string) error {
+	// Tell ovn-*bctl how to talk to the database
+	for _, auth := range []config.OvnAuthConfig{config.OvnNorth, config.OvnSouth} {
+		if err := auth.SetDBAuth(); err != nil {
+			return err
+		}
+	}
+
 	var err error
 
 	nodeIP := config.Default.EncapIP
@@ -65,49 +60,40 @@ func setOVSExternalIDs(nodeName string, ids ...string) error {
 		}
 	}
 
-	args := []string{
-		"set",
+	_, stderr, err := util.RunOVSVsctl("set",
 		"Open_vSwitch",
 		".",
 		fmt.Sprintf("external_ids:ovn-encap-type=%s", config.Default.EncapType),
 		fmt.Sprintf("external_ids:ovn-encap-ip=%s", nodeIP),
 		fmt.Sprintf("external_ids:ovn-remote-probe-interval=%d",
 			config.Default.InactivityProbe),
-	}
-	for _, str := range ids {
-		args = append(args, "external_ids:"+str)
-	}
-	_, stderr, err := util.RunOVSVsctl(args...)
+		fmt.Sprintf("external_ids:hostname=\"%s\"", nodeName),
+	)
 	if err != nil {
 		return fmt.Errorf("error setting OVS external IDs: %v\n  %q", err, stderr)
+	}
+	// If EncapPort is not the default tell sbdb to use specified port.
+	if config.Default.EncapPort != config.DefaultEncapPort {
+		systemID, err := util.GetNodeChassisID()
+		if err != nil {
+			return err
+		}
+		_, stderr, errSet := util.RunOVNSbctl("set", "encap", systemID,
+			fmt.Sprintf("options:dst_port=%d", config.Default.EncapPort),
+		)
+		if errSet != nil {
+			return fmt.Errorf("error setting OVS encap-port: %v\n  %q", errSet, stderr)
+		}
 	}
 	return nil
 }
 
-func setupOVNNode(nodeName, kubeServer, kubeToken, kubeCACert string) error {
-	// Tell ovn-*bctl how to talk to the database
-	for _, auth := range []*config.OvnDBAuth{
-		config.OvnNorth.ClientAuth,
-		config.OvnSouth.ClientAuth} {
-		if err := auth.SetDBAuth(); err != nil {
-			return err
-		}
-	}
-
-	return setOVSExternalIDs(nodeName)
-}
-
 func setupOVNMaster(nodeName string) error {
 	// Configure both server and client of OVN databases, since master uses both
-	for _, auth := range []*config.OvnDBAuth{
-		config.OvnNorth.ServerAuth,
-		config.OvnNorth.ClientAuth,
-		config.OvnSouth.ServerAuth,
-		config.OvnSouth.ClientAuth} {
+	for _, auth := range []config.OvnAuthConfig{config.OvnNorth, config.OvnSouth} {
 		if err := auth.SetDBAuth(); err != nil {
 			return err
 		}
 	}
-
-	return setOVSExternalIDs(nodeName)
+	return nil
 }

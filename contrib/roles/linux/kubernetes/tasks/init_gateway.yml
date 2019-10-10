@@ -1,8 +1,4 @@
 ---
-- name: OVN Gateway | Set init_gateway to false
-  set_fact:
-    init_gateway: false
-
 # The following makes sure that the second time we enter init_gateway we actually
 # fetch the physical interface name and not the bridge name
 # TODO: interfaces that start with 'br' are not supported
@@ -18,7 +14,7 @@
 
 - name: OVN Gateway | Create service OVN Kube Gateway
   blockinfile:
-    path: /etc/systemd/system/ovnkube-gateway-helper.service
+    path: /etc/systemd/system/ovn-kubernetes-node.service
     create: yes
     block: |
       [Unit]
@@ -27,14 +23,14 @@
       [Service]
       ExecStart=/usr/bin/ovnkube \
         -init-node "{{ ansible_hostname }}" \
-        -cluster-subnet "{{ kubernetes_cluster_info.CLUSTER_SUBNET }}" \
+        -cluster-subnets "{{ kubernetes_cluster_info.CLUSTER_SUBNET }}" \
         -k8s-token {{TOKEN}} \
         -k8s-cacert /etc/openvswitch/k8s-ca.crt \
         -k8s-apiserver "http://{{ kubernetes_cluster_info.MASTER_IP }}:8080" \
-        -service-cluster-ip-range "{{ kubernetes_cluster_info.SERVICE_CLUSTER_IP_RANGE }}" \
+        -k8s-service-cidr "{{ kubernetes_cluster_info.SERVICE_CLUSTER_IP_RANGE }}" \
         -nodeport \
         -init-gateways \
-        -gateway-interface={{interface_name}} \
+        -gateway-interface={{physical_interface_name}} \
         -gateway-nexthop="{{gateway_next_hop}}" \
         -nb-address tcp://{{ kubernetes_cluster_info.MASTER_IP }}:6641 \
         -sb-address tcp://{{ kubernetes_cluster_info.MASTER_IP }}:6642
@@ -46,7 +42,7 @@
 
 - name: OVN Gateway | start OVN Kube Gateway Helper
   service:
-    name: "ovnkube-gateway-helper"
+    name: "ovn-kubernetes-node"
     enabled: yes
     state: restarted
     daemon_reload: yes

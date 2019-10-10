@@ -25,7 +25,19 @@ func getBridgeName(iface string) string {
 // GetNicName returns the physical NIC name, given an OVS bridge name
 // configured by NicToBridge()
 func GetNicName(brName string) string {
-	return fmt.Sprintf("%s", brName[len("br"):])
+	stdout, stderr, err := RunOVSVsctl(
+		"br-get-external-id", brName, "bridge-uplink")
+	if err != nil {
+		logrus.Errorf("Failed to get the bridge-uplink for the bridge %q:, stderr: %q, error: %v",
+			brName, stderr, err)
+		return ""
+	}
+	if stdout == "" && strings.HasPrefix(brName, "br") {
+		// This would happen if the bridge was created before the bridge-uplink
+		// changes got integrated.
+		return fmt.Sprintf("%s", brName[len("br"):])
+	}
+	return stdout
 }
 
 func saveIPAddress(oldLink, newLink netlink.Link, addrs []netlink.Addr) error {
@@ -162,6 +174,7 @@ func NicToBridge(iface string) (string, error) {
 	stdout, stderr, err := RunOVSVsctl(
 		"--", "--may-exist", "add-br", bridge,
 		"--", "br-set-external-id", bridge, "bridge-id", bridge,
+		"--", "br-set-external-id", bridge, "bridge-uplink", iface,
 		"--", "set", "bridge", bridge, "fail-mode=standalone",
 		fmt.Sprintf("other_config:hwaddr=%s", ifaceLink.Attrs().HardwareAddr),
 		"--", "--may-exist", "add-port", bridge, iface,
@@ -236,21 +249,45 @@ func BridgeToNic(bridge string) error {
 		return err
 	}
 
+	// for every bridge interface that is of type "patch", find the peer
+	// interface and delete that interface from the integration bridge
+	stdout, stderr, err := RunOVSVsctl("list-ifaces", bridge)
+	if err != nil {
+		logrus.Errorf("Failed to get interfaces for OVS bridge: %q, "+
+			"stderr: %q, error: %v", bridge, stderr, err)
+		return err
+	}
+	ifacesList := strings.Split(strings.TrimSpace(stdout), "\n")
+	for _, iface := range ifacesList {
+		stdout, stderr, err = RunOVSVsctl("get", "interface", iface, "type")
+		if err != nil {
+			logrus.Warnf("Failed to determine the type of interface: %q, "+
+				"stderr: %q, error: %v", iface, stderr, err)
+			continue
+		} else if stdout != "patch" {
+			continue
+		}
+		stdout, stderr, err = RunOVSVsctl("get", "interface", iface, "options:peer")
+		if err != nil {
+			logrus.Warnf("Failed to get the peer port for patch interface: %q, "+
+				"stderr: %q, error: %v", iface, stderr, err)
+			continue
+		}
+		// stdout has the peer interface, just delete it
+		peer := strings.TrimSpace(stdout)
+		_, stderr, err = RunOVSVsctl("--if-exists", "del-port", "br-int", peer)
+		if err != nil {
+			logrus.Warnf("Failed to delete patch port %q on br-int, "+
+				"stderr: %q, error: %v", peer, stderr, err)
+		}
+	}
+
 	// Now delete the bridge
-	stdout, stderr, err := RunOVSVsctl("--", "--if-exists", "del-br", bridge)
+	stdout, stderr, err = RunOVSVsctl("--", "--if-exists", "del-br", bridge)
 	if err != nil {
 		logrus.Errorf("Failed to delete OVS bridge, stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
 		return err
 	}
 	logrus.Infof("Successfully deleted OVS bridge %q", bridge)
-
-	// Now delete the patch port on the integration bridge, if present
-	stdout, stderr, err = RunOVSVsctl("--", "--if-exists", "del-port", "br-int",
-		fmt.Sprintf("k8s-patch-br-int-%s", bridge))
-	if err != nil {
-		logrus.Errorf("Failed to delete patch port on br-int, stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
-		return err
-	}
-
 	return nil
 }
